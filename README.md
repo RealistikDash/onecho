@@ -10,11 +10,17 @@ This project follows three core rules:
 ## Progress
 Current project progress.
 
+Logger:
+- [x] Coloured logging
+- [x] Logging of INFO, WARNING, ERROR.
+- [x] Optional debug logging
+
 Database:
-- [ ] Database object which supports adding dicts and lambda searching
-- [ ] Database loading from JSON
-- [ ] Database saving into JSON
-- [ ] Database Indexes
+- [x] Database object which supports adding dicts and lambda searching
+- [ ] Support removing rows.
+- [x] Database loading from JSON
+- [x] Database saving into JSON
+- [x] Database Indexes
 - [ ] Database Ordering
 
 HTTP:
