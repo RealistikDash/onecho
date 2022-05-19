@@ -199,12 +199,10 @@ class JSONDatabase:
         Does not use indexes.
         """
 
-        res = []
-        for obj in self._data.values():
-            if lam(obj):
-                res.append(obj)
-        
-        return res
+        return [
+            obj for obj in self._data.values()
+            if lam(obj)
+        ]
     
     def fetch_eq(self, field: JsonIndexes, value: JsonTypes) -> list[JsonLike]:
         """Fetches all results where `field` == `value`. Uses indexes when
@@ -225,6 +223,23 @@ class JSONDatabase:
             return self.query(
                 lambda x: x[field] == value
             )
+
+    def query_limit(self, lam: Callable[[JsonLike], bool], limit: int) -> list[JsonLike]:
+        """Like `JSONDatabase.query` but allows you to specify a limit for
+        the amount of results."""
+
+        am = 0 # So we dont have to compute len(res)
+        res = []
+
+        for row in self._data.values():
+            if lam(row):
+                res.append(row)
+                am += 1
+            
+            if am >= limit:
+                break
+        
+        return res
 
 # Database END
 # Shared state
