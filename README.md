@@ -5,6 +5,7 @@ A single-file, dependency-less osu! server implementation.
 This project follows three core rules:
 - All code must be in a single Python file.
 - No modules may be used outside of the Python standard library (meaning many things must be implemented by us)
+- No `re` (regex) library allowed to make the game funnier.
 - Haveing fun.
 
 ## Progress
