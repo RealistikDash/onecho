@@ -10,6 +10,8 @@ from typing import (
     Union,
     Callable,
 )
+from enum import IntEnum
+
 import json
 import os
 import time
@@ -19,7 +21,7 @@ import sys
 DEBUG = "debug" in sys.argv
 
 # Logger
-class Ansi:
+class Ansi(IntEnum):
     BLACK = 30
     RED = 31
     GREEN = 32
@@ -40,12 +42,11 @@ class Ansi:
 
     RESET = 0
 
-def colour_into_console(col: Ansi) -> str:
-    return f"\x1b[{col}m"
+    def __str__(self) -> str:
+        return f"\x1b[{self.value}m"
 
 def _log(content: str, action: str, colour: Ansi = Ansi.WHITE):
     timestamp = time.strftime("%d-%m-%Y %H:%M:%S", time.localtime())
-    colour = colour_into_console(colour)
     sys.stdout.write( # This is mess but it forms in really cool log.
         f"\x1b[90m[{timestamp} - {colour}\033[1"
         f"m{action}\033[0m\x1b[90m]: \x1b[94m{content}\x1b[0m\n"
@@ -193,6 +194,8 @@ class JSONDatabase:
                     res,
                     obj_id,
                 )
+
+        return obj_id
     
     def query(self, lam: Callable[[JsonLike], bool]) -> list[JsonLike]:
         """Iterates over entire db, returning results that match the lambda.
