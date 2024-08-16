@@ -3,22 +3,31 @@
 # Made by:
 # - RealistikDash
 # - Lenfouriee
+from __future__ import annotations
 
+import asyncio
+import http
 from typing import (
     Any,
-    Optional,
+    Iterator,
+    TypeVar,
     Union,
     Callable,
+    Awaitable,
 )
 from enum import IntEnum
 
+import urllib.parse
 import json
 import os
 import time
 import sys
+import socket
 
 # Config Globals
 DEBUG = "debug" in sys.argv
+STATUS_CODE = {c.value: c.phrase for c in http.HTTPStatus}
+
 
 # Logger
 class Ansi(IntEnum):
@@ -45,25 +54,31 @@ class Ansi(IntEnum):
     def __str__(self) -> str:
         return f"\x1b[{self.value}m"
 
+
 def _log(content: str, action: str, colour: Ansi = Ansi.WHITE):
     timestamp = time.strftime("%d-%m-%Y %H:%M:%S", time.localtime())
-    sys.stdout.write( # This is mess but it forms in really cool log.
+    sys.stdout.write(  # This is mess but it forms in really cool log.
         f"\x1b[90m[{timestamp} - {colour}\033[1"
         f"m{action}\033[0m\x1b[90m]: \x1b[94m{content}\x1b[0m\n"
     )
 
+
 def info(text: str):
     _log(text, "INFO", Ansi.GREEN)
+
 
 def error(text: str):
     _log(text, "ERROR", Ansi.RED)
 
+
 def warning(text: str):
     _log(text, "WARNING", Ansi.BLUE)
+
 
 def debug(text: str):
     if DEBUG:
         _log(text, "DEBUG", Ansi.WHITE)
+
 
 # Logger END
 
@@ -72,10 +87,11 @@ JsonTypes = Union[str, int, dict]
 JsonIndexes = Union[str, int]
 JsonLike = Union[dict[JsonIndexes, JsonTypes], list[JsonTypes]]
 
+
 class JSONDatabase:
     """A searchable collection of JSON objects."""
 
-    __slots__ = ( # speed go brrrrrrr
+    __slots__ = (  # speed go brrrrrrr
         "_directory",
         "_data",
         "_index",
@@ -99,23 +115,25 @@ class JSONDatabase:
         self._index: dict[JsonIndexes, dict[JsonTypes, list[int]]] = {}
         self._index_fields: list[JsonIndexes] = indexed_fileds
 
-        self._autoincr = 1 # The next available ID.
+        self._autoincr = 1  # The next available ID.
 
         self.try_load()
-    
+
     def add_new_index(self, field_name: JsonIndexes) -> None:
         """Populates _index with boilerplate data for index."""
 
         self._index[field_name] = {}
-    
+
     def init_new_indexes(self) -> None:
         """Adds boilerplate for a new index list. Assumes no data present."""
 
-        assert not self._data, "New indexes may only be initialised if no data is present"
+        assert (
+            not self._data
+        ), "New indexes may only be initialised if no data is present"
 
         for idx in self._index_fields:
             self.add_new_index(idx)
-    
+
     def acquire_id(self) -> int:
         """Gets the next autoincr id and incr."""
 
@@ -127,25 +145,27 @@ class JSONDatabase:
         """Tries to load the database."""
 
         if not os.path.exists(self._directory):
-            info(f"A database does not exist for {self._directory}. Starting from scratch.")
+            info(
+                f"A database does not exist for {self._directory}. Starting from scratch."
+            )
             self.init_new_indexes()
             return False
-        
+
         self.load()
         info(f"Loaded database from {self._directory}!")
         return True
-    
+
     def load(self) -> None:
         """Loads data from self._directory."""
 
         with open(self._directory, "r") as f:
             read_db = json.load(f)
-        
+
         self._data = {int(index): value for index, value in read_db["data"].items()}
         self._index = read_db["index"]
         self._autoincr = read_db["autoincr"]
         self._index_fields = read_db["index_fields"]
-    
+
     def into_dict(self) -> dict:
         return {
             "data": self._data,
@@ -153,7 +173,7 @@ class JSONDatabase:
             "autoincr": self._autoincr,
             "index_fields": self._index_fields,
         }
-    
+
     def save(self) -> None:
         """Saves the file to directory."""
 
@@ -162,20 +182,20 @@ class JSONDatabase:
                 self.into_dict(),
                 f,
             )
-        
+
         info(f"Saved database info {self._directory}")
-    
+
     def add_index_id(self, idx: JsonIndexes, value: JsonTypes, obj_id: int):
         idx_val = self._index[idx]
 
         value_idx = idx_val.get(value)
         if value_idx is None:
             idx_val[value] = value_idx = []
-        
+
         value_idx.append(obj_id)
 
         debug(f"Indexed row id {obj_id}'s field {idx} for value {value}")
-    
+
     def insert(self, obj: JsonLike) -> int:
         """Inserts an object into the db. Returns object id."""
 
@@ -196,17 +216,14 @@ class JSONDatabase:
                 )
 
         return obj_id
-    
+
     def query(self, lam: Callable[[JsonLike], bool]) -> list[JsonLike]:
         """Iterates over entire db, returning results that match the lambda.
         Does not use indexes.
         """
 
-        return [
-            obj for obj in self._data.values()
-            if lam(obj)
-        ]
-    
+        return [obj for obj in self._data.values() if lam(obj)]
+
     def fetch_eq(self, field: JsonIndexes, value: JsonTypes) -> list[JsonLike]:
         """Fetches all results where `field` == `value`. Uses indexes when
         possible. Else is a wrapper around `query`."""
@@ -217,32 +234,30 @@ class JSONDatabase:
 
             if not val_rows:
                 return []
-            return [
-                self._data[row_id]
-                for row_id in val_rows
-            ]
+            return [self._data[row_id] for row_id in val_rows]
         else:
             debug("Fetching using query.")
-            return self.query(
-                lambda x: x[field] == value
-            )
+            return self.query(lambda x: x[field] == value)
 
-    def query_limit(self, lam: Callable[[JsonLike], bool], limit: int) -> list[JsonLike]:
+    def query_limit(
+        self, lam: Callable[[JsonLike], bool], limit: int
+    ) -> list[JsonLike]:
         """Like `JSONDatabase.query` but allows you to specify a limit for
         the amount of results."""
 
-        am = 0 # So we dont have to compute len(res)
+        am = 0  # So we dont have to compute len(res)
         res = []
 
         for row in self._data.values():
             if lam(row):
                 res.append(row)
                 am += 1
-            
+
             if am >= limit:
                 break
-        
+
         return res
+
 
 # Database END
 # Shared state
@@ -256,4 +271,266 @@ user_db = JSONDatabase(
 
 # HTTP Server
 
+T = TypeVar("T")
+
+
+class CaseInsensitiveDict[T]:
+    def __init__(self) -> None:
+        self._dict: dict[str, T] = {}
+
+    def __repr__(self) -> str:
+        return f"<CaseInsensitiveDict {self._dict!r}>"
+
+    def __setitem__(self, key: str, val: Any) -> None:
+        self._dict[key.lower()] = val
+
+    def __getitem__(self, key: str) -> T:
+        return self._dict[key.lower()]
+
+    def __delitem__(self, key: str) -> None:
+        del self._dict[key.lower()]
+
+    def __iter__(self) -> Iterator[str]:
+        for k in self._dict:
+            yield k
+
+    def __not__(self) -> bool:
+        return not self._dict
+
+    def __concat__(self, d: dict | CaseInsensitiveDict) -> None:
+        self.__conv_dict(d)
+
+    def __contains__(self, key: str) -> bool:
+        return key.lower() in self._dict
+
+    def __conv_dict(self, d: dict | CaseInsensitiveDict) -> None:
+        for k, v in d.items():
+            if k.__class__ is str:
+                k = k.lower()
+            self._dict[k] = v
+
+    def items(self):
+        return self._dict.items()
+
+    def keys(self) -> tuple:
+        return tuple(self._dict.keys())
+
+    def get(self, key: str, default: T) -> T:
+        return self._dict.get(key.lower(), default)
+
+
+class HTTPRequest:
+    def __init__(self, client: socket.socket, server: AsyncHTTPServer) -> None:
+        self._client = client
+        self._server = server
+
+        self.method: str
+        self.path: str
+        self.version: str
+        self.body: bytes
+
+        self.headers: CaseInsensitiveDict[str] = CaseInsensitiveDict()
+        self.query_params: dict[str, str] = {}
+        self.post_params: dict[str, str] = {}
+        self.files: dict[str, bytes] = {}
+
+    async def send_response(
+        self,
+        status_code: int,
+        headers: dict[str, str] = {},
+        body: bytes = b"",
+    ) -> None:
+        response = f"HTTP/1.1 {status_code} {STATUS_CODE[status_code]}\r\n"
+
+        for key, value in headers.items():
+            response += f"{key}: {value}\r\n"
+
+        response += f"Content-Length: {len(body)}\r\n\r\n"
+
+        response = response.encode("utf-8") + body
+
+        try:
+            await asyncio.get_event_loop().sock_sendall(self._client, response)
+        except BrokenPipeError:
+            pass
+
+    async def send_json_response(
+        self,
+        status_code: int,
+        headers: dict[str, str] = {},
+        data: dict[str, Any] = {},
+    ) -> None:
+        headers["Content-Type"] = "application/json"
+
+        await self.send_response(
+            status_code,
+            headers,
+            json.dumps(data).encode("utf-8"),
+        )
+
+    def _parse_headers(self, headers_bytes: bytes) -> None:
+        headers = headers_bytes.decode("utf-8").split("\r\n")
+
+        self.method, self.path, self.version = headers.pop(0).split(" ")
+
+        if "?" in self.path:
+            self.path, query_params_raw = self.path.split("?")
+
+            for query_param in query_params_raw.split("&"):
+                key, value = query_param.split("=", 1)
+
+                self.query_params[urllib.parse.unquote(key)] = urllib.parse.unquote(
+                    value
+                ).strip()
+
+        for header in headers:
+            key, value = header.split(": ")
+            self.headers[key] = value.strip()
+
+    def _parse_multipart(self) -> None:
+        if "Content-Type" not in self.headers:
+            return
+
+        boundary = "--" + self.headers["Content-Type"].split("; boundary=")[1]
+
+        form_data = self.body.split(boundary.encode("utf-8"))
+        for form_entry in form_data[:-1]:
+            if not form_entry.strip():
+                continue
+
+            headers, body = form_entry.split(b"\r\n\r\n", 1)
+            data_type, name = headers.split(b";")[1].strip().split(b"=")
+
+            match data_type:
+                case b"name":
+                    self.post_params[name.decode().strip('"')] = body.decode(
+                        "utf-8"
+                    ).strip()
+                case b"filename":
+                    self.files[name.decode().strip('"')] = body
+
+    def _parse_www_form(self) -> None:
+        form_data = self.body.decode("utf-8")
+
+        for form_entry in form_data.split("&"):
+            key, value = form_entry.split("=", 1)
+
+            self.post_params[urllib.parse.unquote(key)] = urllib.parse.unquote(
+                value
+            ).strip()
+
+    async def parse_request(self) -> None:
+        buffer = bytearray()
+
+        loop = asyncio.get_event_loop()
+        while b"\r\n\r\n" not in buffer:
+            buffer += await loop.sock_recv(self._client, 1024)
+
+        headers, self.body = buffer.split(b"\r\n\r\n", 1)
+        self._parse_headers(headers)
+
+        try:
+            content_len = int(self.headers["Content-Length"])
+        except KeyError:
+            return
+
+        if content_len > len(self.body):
+            self.body += await loop.sock_recv(
+                self._client, content_len - len(self.body)
+            )
+
+        content_type = self.headers.get("Content-Type", "")
+        if (
+            content_type.startswith("multipart/form-data")
+            or "form-data" in content_type
+            or "multipart/form-data" in content_type
+        ):
+            self._parse_multipart()
+        elif content_type in ("x-www-form", "application/x-www-form-urlencoded"):
+            self._parse_www_form()
+
+
+class AsyncHTTPServer:
+    def __init__(self, *, address: str, port: int) -> None:
+        self.address = address
+        self.port = port
+
+        self.on_start_server_coroutine: Callable[..., Awaitable[None]] | None = None
+        self.on_close_server_coroutine: Callable[..., Awaitable[None]] | None = None
+
+        self.before_request_coroutines: list[Callable[..., Awaitable[None]]] = []
+        self.after_request_coroutines: list[Callable[..., Awaitable[None]]] = []
+
+        self.routes: dict[str, Awaitable[None]] = {}
+
+        # statistics!
+        self.requests_served = 0
+
+    def on_start_server(self, coro: Callable[..., Awaitable[None]]) -> None:
+        self.on_start_server_coroutine = coro
+
+    def on_close_server(self, coro: Callable[..., Awaitable[None]]) -> None:
+        self.on_close_server_coroutine = coro
+
+    async def _handle_request(self, client: socket.socket) -> None:
+        info("Handling request")
+
+        request = HTTPRequest(client, self)
+        await request.parse_request()
+
+        # TODO: implement routing and endpoint handling
+        await request.send_response(
+            200,
+            body=b"Hello, world!",
+        )
+
+        self.requests_served += 1
+
+    async def start_server(self) -> None:
+        if self.on_start_server_coroutine is not None:
+            await self.on_start_server_coroutine()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setblocking(False)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            sock.bind((self.address, self.port))
+            sock.listen(5)
+
+            info(f"Server started on {self.address}:{self.port}")
+
+            loop = asyncio.get_event_loop()
+            should_close = False
+            try:
+                while not should_close:
+                    await asyncio.sleep(0.01)
+
+                    client, _ = await loop.sock_accept(sock)
+                    loop.create_task(self._handle_request(client))
+            except asyncio.exceptions.CancelledError:
+                should_close = True
+
+        if self.on_close_server_coroutine is not None:
+            await self.on_close_server_coroutine()
+
+
 # HTTP Server END
+
+
+async def main() -> int:
+    server = AsyncHTTPServer(address="127.0.0.1", port=2137)
+
+    @server.on_start_server
+    async def on_start_server() -> None:
+        info("Server started!")
+
+    @server.on_close_server
+    async def on_close_server() -> None:
+        info("Server closed!")
+
+    await server.start_server()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))

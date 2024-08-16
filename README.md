@@ -25,7 +25,7 @@ Database:
 - [ ] Database Ordering
 
 HTTP:
-- [ ] Async HTTP Server
+- [x] Async HTTP Server
 - [ ] Host based domain routing
 - [ ] Async HTTP Client
 
