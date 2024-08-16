@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import http
+import traceback
 from typing import (
     Any,
     Iterator,
@@ -450,6 +451,44 @@ class HTTPRequest:
             self._parse_www_form()
 
 
+HTTP_HANDLER = Callable[[HTTPRequest], Awaitable[None]]
+
+
+class Endpoint:
+    def __init__(
+        self, path: str, handler: HTTP_HANDLER, methods: list[str] = ["GET"]
+    ) -> None:
+        self.path = path
+        self.handler = handler
+        self.methods = methods
+
+    def match(self, path: str) -> bool:
+        return self.path == path
+
+
+class Router:
+    def __init__(self, domain: str) -> None:
+        self.domain = domain
+        self.endpoints: set[Endpoint] = set()
+
+    def match(self, path: str) -> bool:
+        return self.domain == path
+
+    def find_endpoint(self, path: str) -> Endpoint | None:
+        for endpoint in self.endpoints:
+            if endpoint.match(path):
+                return endpoint
+
+        return None
+
+    def add_endpoint(self, path: str, methods: list[str] = ["GET"]) -> Callable:
+        def decorator(handler: HTTP_HANDLER) -> HTTP_HANDLER:
+            self.endpoints.add(Endpoint(path, handler, methods))
+            return handler
+
+        return decorator
+
+
 class AsyncHTTPServer:
     def __init__(self, *, address: str, port: int) -> None:
         self.address = address
@@ -458,10 +497,10 @@ class AsyncHTTPServer:
         self.on_start_server_coroutine: Callable[..., Awaitable[None]] | None = None
         self.on_close_server_coroutine: Callable[..., Awaitable[None]] | None = None
 
-        self.before_request_coroutines: list[Callable[..., Awaitable[None]]] = []
-        self.after_request_coroutines: list[Callable[..., Awaitable[None]]] = []
+        self.before_request_coroutines: list[HTTP_HANDLER] = []
+        self.after_request_coroutines: list[HTTP_HANDLER] = []
 
-        self.routes: dict[str, Awaitable[None]] = {}
+        self.routes: set[Router] = set()
 
         # statistics!
         self.requests_served = 0
@@ -472,19 +511,67 @@ class AsyncHTTPServer:
     def on_close_server(self, coro: Callable[..., Awaitable[None]]) -> None:
         self.on_close_server_coroutine = coro
 
-    async def _handle_request(self, client: socket.socket) -> None:
-        info("Handling request")
+    def find_router(self, domain: str) -> Router | None:
+        for router in self.routes:
+            if router.match(domain):
+                return router
 
+        return None
+
+    def add_router(self, router: Router) -> None:
+        self.routes.add(router)
+
+    async def _handle_routing(self, request: HTTPRequest) -> None:
+        try:
+            host = request.headers["Host"]
+            router = self.find_router(host)
+
+            if router is None:
+                await response_404(request)
+                return
+
+            endpoint = router.find_endpoint(request.path)
+
+            if endpoint is None:
+                await response_404(request)
+                return
+
+            if request.method not in endpoint.methods:
+                await response_405(request)
+                return
+
+            for coro in self.before_request_coroutines:
+                await coro(request)
+
+            await endpoint.handler(request)
+
+            for coro in self.after_request_coroutines:
+                await coro(request)
+
+        except Exception:
+            await response_500(request)
+
+    async def _handle_request(self, client: socket.socket) -> None:
         request = HTTPRequest(client, self)
         await request.parse_request()
 
-        # TODO: implement routing and endpoint handling
-        await request.send_response(
-            200,
-            body=b"Hello, world!",
-        )
+        if "Host" not in request.headers:
+            client.shutdown(socket.SHUT_RDWR)
+            client.close()
+            return
+
+        await self._handle_routing(request)
+
+        try:
+            client.shutdown(socket.SHUT_RDWR)
+            client.close()
+        except OSError:
+            pass
 
         self.requests_served += 1
+
+        path = f"{request.headers['Host']}{request.path}"
+        info(f"Handled {request.method} {path}")
 
     async def start_server(self) -> None:
         if self.on_start_server_coroutine is not None:
@@ -516,9 +603,46 @@ class AsyncHTTPServer:
 
 # HTTP Server END
 
+# HTTP Responses
+
+async def response_404(request: HTTPRequest) -> None:
+    await request.send_response(
+        status_code=404,
+        body=b"Not Found",
+    )
+
+
+async def response_405(request: HTTPRequest) -> None:
+    await request.send_response(
+        status_code=405,
+        body=b"Method Not Allowed",
+    )
+
+
+async def response_500(request: HTTPRequest) -> None:
+    tb = traceback.format_exc()
+
+    await request.send_response(
+        status_code=500,
+        body=f"Whoops! Fuck python!\n\n{tb}".encode(),
+    )
+
+
+# HTTP Responses END
+
 
 async def main() -> int:
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
+    router = Router("127.0.0.1:2137")
+
+    @router.add_endpoint("/")
+    async def index(request: HTTPRequest) -> None:
+        await request.send_response(
+            status_code=200,
+            body=b"Hello, world!",
+        )
+
+    server.add_router(router)
 
     @server.on_start_server
     async def on_start_server() -> None:

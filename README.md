@@ -26,7 +26,7 @@ Database:
 
 HTTP:
 - [x] Async HTTP Server
-- [ ] Host based domain routing
+- [x] Host based domain routing
 - [ ] Async HTTP Client
 
 Packets:
