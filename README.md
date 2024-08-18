@@ -34,11 +34,11 @@ Packets:
 - [x] Binary Reader
 - [x] Builder API for writer
 - [ ] Packet registration router
-- [ ] Packet registration decorator
+- [x] Packet registration decorator
 
 Bancho:
-- [ ] User Login
-- [ ] User Actions
+- [?] User Login
+- [x] User Actions
 - [ ] Private Chat
 - [ ] Public Chat
 - [ ] Spectator

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import cache, cached_property
 import random
 import string
 import struct
@@ -18,28 +19,23 @@ import time
 import sys
 import socket
 
+from collections.abc import MutableMapping
+from collections.abc import Mapping
+from collections import OrderedDict
+
 from typing import Any
-from typing import TypedDict
-from typing import Iterator
-from typing import TypeVar
 from typing import Union
 from typing import Callable
 from typing import Awaitable
-from enum import IntEnum, IntFlag
+
+from enum import IntEnum
+from enum import IntFlag
 from dataclasses import dataclass, field
 
-# Config Globals START
+# Global Constants START
 
 
 DEBUG = "debug" in sys.argv
-
-
-# Config Globals END
-
-
-# HTTP Constants START
-
-
 STATUS_CODE = {
     100: "Continue",
     101: "Switching Protocols",
@@ -84,13 +80,6 @@ STATUS_CODE = {
     505: "HTTP Version Not Supported",
 }
 
-
-# HTTP Constants END
-
-
-# Osu Constants START
-
-
 # fmt: off
 COUNTRY_CODES = {
     "oc": 1,   "eu": 2,   "ad": 3,   "ae": 4,   "af": 5,   "ag": 6,   "ai": 7,   "al": 8,
@@ -128,10 +117,187 @@ COUNTRY_CODES = {
 }
 # fmt: on
 
-NEXT_USER_ID = 3
+HEADER_LEN = 7
 
 
-# Osu Constants END
+class BanchoAction(IntEnum):
+    IDLE = 0
+    AFK = 1
+    PLAYING = 2
+    EDITING = 3
+    MODDING = 4
+    MULTIPLAYER = 5
+    WATCHING = 6
+    UNKNOWN = 7
+    TESTING = 8
+    SUBMITTING = 9
+    PAUSED = 10
+    LOBBY = 11
+    MULTIPLAYING = 12
+    OSU_DIRECT = 13
+
+
+class OsuMode(IntEnum):
+    OSU = 0
+    TAIKO = 1
+    CTB = 2
+    MANIA = 3
+
+
+class OsuMods(IntFlag):
+    NOMOD = 0
+    NOFAIL = 1 << 0
+    EASY = 1 << 1
+    TOUCHSCREEN = 1 << 2
+    HIDDEN = 1 << 3
+    HARDROCK = 1 << 4
+    SUDDENDEATH = 1 << 5
+    DOUBLETIME = 1 << 6
+    RELAX = 1 << 7
+    HALFTIME = 1 << 8
+    NIGHTCORE = 1 << 9
+    FLASHLIGHT = 1 << 10
+    AUTOPLAY = 1 << 11
+    SPUNOUT = 1 << 12
+    AUTOPILOT = 1 << 13
+    PERFECT = 1 << 14
+    KEY4 = 1 << 15
+    KEY5 = 1 << 16
+    KEY6 = 1 << 17
+    KEY7 = 1 << 18
+    KEY8 = 1 << 19
+    FADEIN = 1 << 20
+    RANDOM = 1 << 21
+    CINEMA = 1 << 22
+    TARGET = 1 << 23
+    KEY9 = 1 << 24
+    KEYCOOP = 1 << 25
+    KEY1 = 1 << 26
+    KEY3 = 1 << 27
+    KEY2 = 1 << 28
+    SCOREV2 = 1 << 29
+    MIRROR = 1 << 30
+
+    SPEED_MODS = DOUBLETIME | NIGHTCORE | HALFTIME
+    GAME_CHANGING = RELAX | AUTOPILOT
+
+
+class BanchoPrivileges(IntFlag):
+    PLAYER = 1 << 0
+    MODERATOR = 1 << 1
+    SUPPORTER = 1 << 2
+    OWNER = 1 << 3
+    DEVELOPER = 1 << 4
+    TOURNAMENT = 1 << 5
+
+
+class BanchoPacketID(IntEnum):
+    OSU_CHANGE_ACTION = 0
+    OSU_SEND_PUBLIC_MESSAGE = 1
+    OSU_LOGOUT = 2
+    OSU_REQUEST_STATUS_UPDATE = 3
+    OSU_HEARTBEAT = 4
+    SRV_LOGIN_REPLY = 5
+    SRV_SEND_MESSAGE = 7
+    SRV_HEARTBEAT = 8
+    SRV_USER_STATS = 11
+    SRV_USER_LOGOUT = 12
+    SRV_SPECTATOR_JOINED = 13
+    SRV_SPECTATOR_LEFT = 14
+    SRV_SPECTATE_FRAMES = 15
+    OSU_START_SPECTATING = 16
+    OSU_STOP_SPECTATING = 17
+    OSU_SPECTATE_FRAMES = 18
+    SRV_VERSION_UPDATE = 19
+    OSU_ERROR_REPORT = 20
+    OSU_CANT_SPECTATE = 21
+    SRV_SPECTATOR_CANT_SPECTATE = 22
+    SRV_GET_ATTENTION = 23
+    SRV_NOTIFICATION = 24
+    OSU_SEND_PRIVATE_MESSAGE = 25
+    SRV_UPDATE_MATCH = 26
+    SRV_NEW_MATCH = 27
+    SRV_DISPOSE_MATCH = 28
+    OSU_PART_LOBBY = 29
+    OSU_JOIN_LOBBY = 30
+    OSU_CREATE_MATCH = 31
+    OSU_JOIN_MATCH = 32
+    OSU_PART_MATCH = 33
+    SRV_TOGGLE_BLOCK_NON_FRIEND_DMS = 34
+    SRV_MATCH_JOIN_SUCCESS = 36
+    SRV_MATCH_JOIN_FAIL = 37
+    OSU_MATCH_CHANGE_SLOT = 38
+    OSU_MATCH_READY = 39
+    OSU_MATCH_LOCK = 40
+    OSU_MATCH_CHANGE_SETTINGS = 41
+    SRV_FELLOW_SPECTATOR_JOINED = 42
+    SRV_FELLOW_SPECTATOR_LEFT = 43
+    OSU_MATCH_START = 44
+    SRV_ALL_PLAYERS_LOADED = 45
+    SRV_MATCH_START = 46
+    OSU_MATCH_SCORE_UPDATE = 47
+    SRV_MATCH_SCORE_UPDATE = 48
+    OSU_MATCH_COMPLETE = 49
+    SRV_MATCH_TRANSFER_HOST = 50
+    OSU_MATCH_CHANGE_MODS = 51
+    OSU_MATCH_LOAD_COMPLETE = 52
+    SRV_MATCH_ALL_PLAYERS_LOADED = 53
+    OSU_MATCH_NO_BEATMAP = 54
+    OSU_MATCH_UNREADY = 55
+    OSU_MATCH_FAILED = 56
+    SRV_MATCH_PLAYER_FAILED = 57
+    SRV_MATCH_COMPLETE = 58
+    OSU_MATCH_HAS_BEATMAP = 59
+    OSU_MATCH_SKIP_REQUEST = 60
+    SRV_MATCH_SKIP = 61
+    OSU_CHANNEL_JOIN = 63
+    SRV_CHANNEL_JOIN_SUCCESS = 64
+    SRV_CHANNEL_INFO = 65
+    SRV_CHANNEL_KICK = 66
+    SRV_CHANNEL_AUTO_JOIN = 67
+    OSU_BEATMAP_INFO_REQUEST = 68
+    SRV_BEATMAP_INFO_REPLY = 69
+    OSU_MATCH_TRANSFER_HOST = 70
+    SRV_PRIVILEGES = 71
+    SRV_FRIENDS_LIST = 72
+    OSU_FRIEND_ADD = 73
+    OSU_FRIEND_REMOVE = 74
+    SRV_PROTOCOL_VERSION = 75
+    SRV_MAIN_MENU_ICON = 76
+    OSU_MATCH_CHANGE_TEAM = 77
+    OSU_CHANNEL_PART = 78
+    OSU_RECEIVE_UPDATES = 79
+    SRV_MATCH_PLAYER_SKIPPED = 81
+    OSU_SET_AWAY_MESSAGE = 82
+    SRV_USER_PRESENCE = 83
+    OSU_USER_STATS_REQUEST = 85
+    SRV_RESTART = 86
+    OSU_MATCH_INVITE = 87
+    SRV_MATCH_INVITE = 88
+    SRV_CHANNEL_INFO_END = 89
+    OSU_MATCH_CHANGE_PASSWORD = 90
+    SRV_MATCH_CHANGE_PASSWORD = 91
+    SRV_SILENCE_END = 92
+    OSU_TOURNAMENT_MATCH_INFO_REQUEST = 93
+    SRV_USER_SILENCED = 94
+    SRV_USER_PRESENCE_SINGLE = 95
+    SRV_USER_PRESENCE_BUNDLE = 96
+    OSU_USER_PRESENCE_REQUEST = 97
+    OSU_USER_PRESENCE_REQUEST_ALL = 98
+    OSU_TOGGLE_BLOCK_NON_FRIEND_DMS = 99
+    SRV_USER_DM_BLOCKED = 100
+    SRV_TARGET_IS_SILENCED = 101
+    SRV_VERSION_UPDATE_FORCED = 102
+    SRV_SWITCH_SERVER = 103
+    SRV_ACCOUNT_RESTRICTED = 104
+    SRV_RTX = 105
+    SRV_MATCH_ABORT = 106
+    SRV_SWITCH_TOURNAMENT_SERVER = 107
+    OSU_TOURNAMENT_JOIN_MATCH_CHANNEL = 108
+    OSU_TOURNAMENT_LEAVE_MATCH_CHANNEL = 109
+
+
+# Global Constants END
 
 
 # Logger START
@@ -191,6 +357,7 @@ def debug(text: str):
 
 
 # Database START
+# TODO: Redo this database logic to use .csv
 
 
 JsonTypes = Union[str, int, dict]
@@ -372,67 +539,49 @@ class JSONDatabase:
 # Database END
 
 
-# Shared state START
-
-
-user_db = JSONDatabase(
-    ["username"],
-    "user_db.json",
-)
-
-
-# Shared state END
-
-
 # HTTP Server START
 
 
-T = TypeVar("T")
+class CaseInsensitiveDict(MutableMapping):
+    def __init__(self, data=None, **kwargs):
+        self._store = OrderedDict()
+        if data is None:
+            data = {}
+        self.update(data, **kwargs)
 
+    def __setitem__(self, key, value):
+        self._store[key.lower()] = (key, value)
 
-class CaseInsensitiveDict[T]:
-    def __init__(self) -> None:
-        self._dict: dict[str, T] = {}
+    def __getitem__(self, key):
+        return self._store[key.lower()][1]
 
-    def __repr__(self) -> str:
-        return f"<CaseInsensitiveDict {self._dict!r}>"
+    def __delitem__(self, key):
+        del self._store[key.lower()]
 
-    def __setitem__(self, key: str, val: Any) -> None:
-        self._dict[key.lower()] = val
+    def __iter__(self):
+        return (casedkey for casedkey, mappedvalue in self._store.values())
 
-    def __getitem__(self, key: str) -> T:
-        return self._dict[key.lower()]
+    def __len__(self):
+        return len(self._store)
 
-    def __delitem__(self, key: str) -> None:
-        del self._dict[key.lower()]
+    def lower_items(self):
+        """Like iteritems(), but with all lowercase keys."""
+        return ((lowerkey, keyval[1]) for (lowerkey, keyval) in self._store.items())
 
-    def __iter__(self) -> Iterator[str]:
-        for k in self._dict:
-            yield k
+    def __eq__(self, other):
+        if isinstance(other, Mapping):
+            other = CaseInsensitiveDict(other)
+        else:
+            return NotImplemented
+        # Compare insensitively
+        return dict(self.lower_items()) == dict(other.lower_items())
 
-    def __not__(self) -> bool:
-        return not self._dict
+    # Copy is required
+    def copy(self):
+        return CaseInsensitiveDict(self._store.values())
 
-    def __concat__(self, d: dict | CaseInsensitiveDict) -> None:
-        self.__conv_dict(d)
-
-    def __contains__(self, key: str) -> bool:
-        return key.lower() in self._dict
-
-    def __conv_dict(self, d: dict | CaseInsensitiveDict) -> None:
-        for k, v in d.items():
-            if k.__class__ is str:
-                k = k.lower()
-            self._dict[k] = v
-
-    def items(self):
-        return self._dict.items()
-
-    def keys(self) -> tuple:
-        return tuple(self._dict.keys())
-
-    def get(self, key: str, default: T | None = None) -> T | None:
-        return self._dict.get(key.lower(), default)
+    def __repr__(self):
+        return str(dict(self.items()))
 
 
 class HTTPRequest:
@@ -445,7 +594,7 @@ class HTTPRequest:
         self.version: str
         self.body: bytes
 
-        self.headers: CaseInsensitiveDict[str] = CaseInsensitiveDict()
+        self.headers: CaseInsensitiveDict = CaseInsensitiveDict()
         self.query_params: dict[str, str] = {}
         self.post_params: dict[str, str] = {}
         self.files: dict[str, bytes] = {}
@@ -535,7 +684,7 @@ class HTTPRequest:
                 value
             ).strip()
 
-    async def parse_request(self) -> None:
+    async def _parse_request(self) -> None:
         buffer = bytearray()
 
         loop = asyncio.get_event_loop()
@@ -555,10 +704,7 @@ class HTTPRequest:
                 self._client, content_len - len(self.body)
             )
 
-        content_type = self.headers.get("Content-Type")
-        if content_type is None:
-            return
-
+        content_type = self.headers.get("Content-Type", "")
         if (
             content_type.startswith("multipart/form-data")
             or "form-data" in content_type
@@ -570,27 +716,41 @@ class HTTPRequest:
 
 
 HttpHandler = Callable[[HTTPRequest], Awaitable[None]]
+ServerEventHandler = Callable[[], Awaitable[None]]
 
 
 class Endpoint:
-    def __init__(
-        self, path: str, handler: HttpHandler, methods: list[str] = ["GET"]
-    ) -> None:
+    def __init__(self, path: str | set[str], handler: HttpHandler, methods: list[str]):
         self.path = path
         self.handler = handler
         self.methods = methods
 
     def match(self, path: str) -> bool:
+        if isinstance(self.path, set):
+            return path in self.path
+
         return self.path == path
 
 
 class Router:
-    def __init__(self, domain: str) -> None:
-        self.domain = domain
+    def __init__(self, domains: str | set[str]) -> None:
+        self.domains = domains
         self.endpoints: set[Endpoint] = set()
 
-    def match(self, path: str) -> bool:
-        return self.domain == path
+    def add_endpoint(
+        self, path: str | set[str], methods: list[str] = ["GET"]
+    ) -> Callable:
+        def decorator(handler: HttpHandler) -> HttpHandler:
+            self.endpoints.add(Endpoint(path, handler, methods))
+            return handler
+
+        return decorator
+
+    def match(self, domain: str) -> bool:
+        if isinstance(self.domains, set):
+            return domain in self.domains
+
+        return self.domains == domain
 
     def find_endpoint(self, path: str) -> Endpoint | None:
         for endpoint in self.endpoints:
@@ -599,21 +759,14 @@ class Router:
 
         return None
 
-    def add_endpoint(self, path: str, methods: list[str] = ["GET"]) -> Callable:
-        def decorator(handler: HttpHandler) -> HttpHandler:
-            self.endpoints.add(Endpoint(path, handler, methods))
-            return handler
-
-        return decorator
-
 
 class AsyncHTTPServer:
     def __init__(self, *, address: str, port: int) -> None:
         self.address = address
         self.port = port
 
-        self.on_start_server_coroutine: Callable[..., Awaitable[None]] | None = None
-        self.on_close_server_coroutine: Callable[..., Awaitable[None]] | None = None
+        self.on_start_server_coroutine: ServerEventHandler | None = None
+        self.on_close_server_coroutine: ServerEventHandler | None = None
 
         self.before_request_coroutines: list[HttpHandler] = []
         self.after_request_coroutines: list[HttpHandler] = []
@@ -623,10 +776,10 @@ class AsyncHTTPServer:
         # statistics!
         self.requests_served = 0
 
-    def on_start_server(self, coro: Callable[..., Awaitable[None]]) -> None:
+    def on_start_server(self, coro: ServerEventHandler) -> None:
         self.on_start_server_coroutine = coro
 
-    def on_close_server(self, coro: Callable[..., Awaitable[None]]) -> None:
+    def on_close_server(self, coro: ServerEventHandler) -> None:
         self.on_close_server_coroutine = coro
 
     def find_router(self, domain: str) -> Router | None:
@@ -667,11 +820,13 @@ class AsyncHTTPServer:
                 await coro(request)
 
         except Exception:
-            await response_500(request)
+            tb = traceback.format_exc()
+            error(f"An error occurred while handling request.\n{tb}")
+            await response_500(request, tb)
 
     async def _handle_request(self, client: socket.socket) -> None:
         request = HTTPRequest(client, self)
-        await request.parse_request()
+        await request._parse_request()
 
         if "Host" not in request.headers:
             client.shutdown(socket.SHUT_RDWR)
@@ -702,8 +857,6 @@ class AsyncHTTPServer:
             sock.bind((self.address, self.port))
             sock.listen(5)
 
-            info(f"Server started on {self.address}:{self.port}")
-
             loop = asyncio.get_event_loop()
             should_close = False
             try:
@@ -722,6 +875,33 @@ class AsyncHTTPServer:
 # HTTP Server END
 
 
+# HTTP Middleware START
+
+
+async def response_404(request: HTTPRequest) -> None:
+    await request.send_response(
+        status_code=404,
+        body=b"404 Not Found",
+    )
+
+
+async def response_405(request: HTTPRequest) -> None:
+    await request.send_response(
+        status_code=405,
+        body=b"405 Method Not Allowed",
+    )
+
+
+async def response_500(request: HTTPRequest, tb: str) -> None:
+    await request.send_response(
+        status_code=500,
+        body=f"500 Whoops! Fuck python!\n\n{tb}".encode(),
+    )
+
+
+# HTTP Middleware END
+
+
 # HTTP Client START
 
 
@@ -730,7 +910,7 @@ class HTTPResponse:
     url: str
     status_code: int
     http_version: int
-    headers: CaseInsensitiveDict[str]
+    headers: CaseInsensitiveDict
     body: bytes
 
     @property
@@ -756,6 +936,7 @@ class HTTPClient:
 
         req = urllib.request.Request(url, method=method, data=body, headers=headers)
         response = await asyncio.to_thread(urllib.request.urlopen, req)
+        body = await asyncio.to_thread(response.read)
 
         case_headers = CaseInsensitiveDict()
         for key, value in response.headers.items():
@@ -766,7 +947,7 @@ class HTTPClient:
             status_code=response.status,
             http_version=response.version,
             headers=case_headers,
-            body=response.read(),
+            body=body,
         )
 
     async def get(
@@ -791,36 +972,7 @@ class HTTPClient:
 # HTTP Client END
 
 
-# HTTP Responses START
-
-
-async def response_404(request: HTTPRequest) -> None:
-    await request.send_response(
-        status_code=404,
-        body=b"Not Found",
-    )
-
-
-async def response_405(request: HTTPRequest) -> None:
-    await request.send_response(
-        status_code=405,
-        body=b"Method Not Allowed",
-    )
-
-
-async def response_500(request: HTTPRequest) -> None:
-    tb = traceback.format_exc()
-
-    await request.send_response(
-        status_code=500,
-        body=f"Whoops! Fuck python!\n\n{tb}".encode(),
-    )
-
-
-# HTTP Responses END
-
-
-# String Helpers
+# Helper functions START
 
 
 def safe_string(s: str) -> str:
@@ -833,125 +985,49 @@ def create_random_string(n: int) -> str:
     )
 
 
-# String Helpers END
+async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
+    http_client = HTTPClient()
+
+    if ip is None or ip in ("127.0.0.1", "localhost"):
+        url = "http://ip-api.com/json"
+    else:
+        url = f"http://ip-api.com/json/{ip}"
+
+    response = await http_client.get(
+        url,
+        query_params={"fields": "status,countryCode,lat,lon"},
+    )
+    json_data = response.json()
+
+    if json_data["status"] == "fail":
+        return UserGeolocalisation(  # Mumbai, India.
+            country_acronym="IN",
+            country_code=COUNTRY_CODES["in"],
+            latitude=19.0760,
+            longitude=72.8777,
+        )
+
+    return UserGeolocalisation(
+        country_acronym=json_data["countryCode"],
+        country_code=COUNTRY_CODES[json_data["countryCode"].lower()],
+        latitude=json_data["lat"],
+        longitude=json_data["lon"],
+    )
+
+
+# Helper functions END
 
 
 # Bancho Packets START
 
 
-class PacketID(IntEnum):
-    OSU_CHANGE_ACTION = 0
-    OSU_SEND_PUBLIC_MESSAGE = 1
-    OSU_LOGOUT = 2
-    OSU_REQUEST_STATUS_UPDATE = 3
-    OSU_HEARTBEAT = 4
-    SRV_LOGIN_REPLY = 5
-    SRV_SEND_MESSAGE = 7
-    SRV_HEARTBEAT = 8
-    SRV_USER_STATS = 11
-    SRV_USER_LOGOUT = 12
-    SRV_SPECTATOR_JOINED = 13
-    SRV_SPECTATOR_LEFT = 14
-    SRV_SPECTATE_FRAMES = 15
-    OSU_START_SPECTATING = 16
-    OSU_STOP_SPECTATING = 17
-    OSU_SPECTATE_FRAMES = 18
-    SRV_VERSION_UPDATE = 19
-    OSU_ERROR_REPORT = 20
-    OSU_CANT_SPECTATE = 21
-    SRV_SPECTATOR_CANT_SPECTATE = 22
-    SRV_GET_ATTENTION = 23
-    SRV_NOTIFICATION = 24
-    OSU_SEND_PRIVATE_MESSAGE = 25
-    SRV_UPDATE_MATCH = 26
-    SRV_NEW_MATCH = 27
-    SRV_DISPOSE_MATCH = 28
-    OSU_PART_LOBBY = 29
-    OSU_JOIN_LOBBY = 30
-    OSU_CREATE_MATCH = 31
-    OSU_JOIN_MATCH = 32
-    OSU_PART_MATCH = 33
-    SRV_TOGGLE_BLOCK_NON_FRIEND_DMS = 34
-    SRV_MATCH_JOIN_SUCCESS = 36
-    SRV_MATCH_JOIN_FAIL = 37
-    OSU_MATCH_CHANGE_SLOT = 38
-    OSU_MATCH_READY = 39
-    OSU_MATCH_LOCK = 40
-    OSU_MATCH_CHANGE_SETTINGS = 41
-    SRV_FELLOW_SPECTATOR_JOINED = 42
-    SRV_FELLOW_SPECTATOR_LEFT = 43
-    OSU_MATCH_START = 44
-    SRV_ALL_PLAYERS_LOADED = 45
-    SRV_MATCH_START = 46
-    OSU_MATCH_SCORE_UPDATE = 47
-    SRV_MATCH_SCORE_UPDATE = 48
-    OSU_MATCH_COMPLETE = 49
-    SRV_MATCH_TRANSFER_HOST = 50
-    OSU_MATCH_CHANGE_MODS = 51
-    OSU_MATCH_LOAD_COMPLETE = 52
-    SRV_MATCH_ALL_PLAYERS_LOADED = 53
-    OSU_MATCH_NO_BEATMAP = 54
-    OSU_MATCH_UNREADY = 55
-    OSU_MATCH_FAILED = 56
-    SRV_MATCH_PLAYER_FAILED = 57
-    SRV_MATCH_COMPLETE = 58
-    OSU_MATCH_HAS_BEATMAP = 59
-    OSU_MATCH_SKIP_REQUEST = 60
-    SRV_MATCH_SKIP = 61
-    OSU_CHANNEL_JOIN = 63
-    SRV_CHANNEL_JOIN_SUCCESS = 64
-    SRV_CHANNEL_INFO = 65
-    SRV_CHANNEL_KICK = 66
-    SRV_CHANNEL_AUTO_JOIN = 67
-    OSU_BEATMAP_INFO_REQUEST = 68
-    SRV_BEATMAP_INFO_REPLY = 69
-    OSU_MATCH_TRANSFER_HOST = 70
-    SRV_PRIVILEGES = 71
-    SRV_FRIENDS_LIST = 72
-    OSU_FRIEND_ADD = 73
-    OSU_FRIEND_REMOVE = 74
-    SRV_PROTOCOL_VERSION = 75
-    SRV_MAIN_MENU_ICON = 76
-    OSU_MATCH_CHANGE_TEAM = 77
-    OSU_CHANNEL_PART = 78
-    OSU_RECEIVE_UPDATES = 79
-    SRV_MATCH_PLAYER_SKIPPED = 81
-    OSU_SET_AWAY_MESSAGE = 82
-    SRV_USER_PRESENCE = 83
-    OSU_USER_STATS_REQUEST = 85
-    SRV_RESTART = 86
-    OSU_MATCH_INVITE = 87
-    SRV_MATCH_INVITE = 88
-    SRV_CHANNEL_INFO_END = 89
-    OSU_MATCH_CHANGE_PASSWORD = 90
-    SRV_MATCH_CHANGE_PASSWORD = 91
-    SRV_SILENCE_END = 92
-    OSU_TOURNAMENT_MATCH_INFO_REQUEST = 93
-    SRV_USER_SILENCED = 94
-    SRV_USER_PRESENCE_SINGLE = 95
-    SRV_USER_PRESENCE_BUNDLE = 96
-    OSU_USER_PRESENCE_REQUEST = 97
-    OSU_USER_PRESENCE_REQUEST_ALL = 98
-    OSU_TOGGLE_BLOCK_NON_FRIEND_DMS = 99
-    SRV_USER_DM_BLOCKED = 100
-    SRV_TARGET_IS_SILENCED = 101
-    SRV_VERSION_UPDATE_FORCED = 102
-    SRV_SWITCH_SERVER = 103
-    SRV_ACCOUNT_RESTRICTED = 104
-    SRV_RTX = 105
-    SRV_MATCH_ABORT = 106
-    SRV_SWITCH_TOURNAMENT_SERVER = 107
-    OSU_TOURNAMENT_JOIN_MATCH_CHANNEL = 108
-    OSU_TOURNAMENT_LEAVE_MATCH_CHANNEL = 109
-
-
 class BinaryReader:
-    def __init__(self, bytes_data: bytearray) -> None:
-        self.__buffer = bytes_data
+    def __init__(self, bytes_data: bytes) -> None:
+        self.__buffer = bytearray(bytes_data)
         self.__offset = 0
 
     def __len__(self) -> int:
-        return len(self.__buffer)
+        return len(self.__buffer[self.__offset :])
 
     def read(self, offset: int = -1) -> bytes:
         if offset < 0:
@@ -960,6 +1036,10 @@ class BinaryReader:
         data = self.__buffer[self.__offset : self.__offset + offset]
         self.__offset += offset
         return data
+
+    def read_osu_header(self) -> tuple[BanchoPacketID, int]:
+        packet_id, size = struct.unpack("<HxI", self.read(HEADER_LEN))
+        return BanchoPacketID(packet_id), size
 
     def read_int(self, size: int, signed: bool) -> int:
         return int.from_bytes(
@@ -1011,6 +1091,10 @@ class BinaryReader:
     def read_string(self) -> str:
         s_len = self.read_uleb128()
         return self.read(s_len).decode()
+
+    def read_osu_list(self) -> list[int]:
+        count = self.read_u16()
+        return [self.read_i32() for _ in range(count)]
 
 
 class BinaryWriter:
@@ -1094,14 +1178,14 @@ class BinaryWriter:
 
 
 class PacketBuilder(BinaryWriter):
-    def __init__(self, packet_id: PacketID) -> None:
+    def __init__(self, packet_id: BanchoPacketID) -> None:
         self.packet_id = packet_id
         super().__init__()
 
     def finish(self) -> bytearray:
         packet_bytes = bytearray()
 
-        packet_bytes += struct.pack("<h", self.packet_id)
+        packet_bytes += struct.pack("<h", self.packet_id.value)
         packet_bytes += b"\x00"
         packet_bytes += struct.pack("<l", len(self.buffer))
         packet_bytes += self.buffer
@@ -1110,59 +1194,56 @@ class PacketBuilder(BinaryWriter):
 
 
 def bancho_notification_packet(message: str) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_NOTIFICATION)
+    packet = PacketBuilder(BanchoPacketID.SRV_NOTIFICATION)
     packet.write_string(message)
     return packet.finish()
 
 
 def bancho_login_reply_packet(user_id: int) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_LOGIN_REPLY)
+    packet = PacketBuilder(BanchoPacketID.SRV_LOGIN_REPLY)
     packet.write_i32(user_id)
     return packet.finish()
 
 
 def bancho_protocol_packet() -> bytes:
-    packet = PacketBuilder(PacketID.SRV_PROTOCOL_VERSION)
+    packet = PacketBuilder(BanchoPacketID.SRV_PROTOCOL_VERSION)
     packet.write_i32(19)
     return packet.finish()
 
 
 def bancho_channel_info_end_packet() -> bytes:
-    packet = PacketBuilder(PacketID.SRV_CHANNEL_INFO_END)
+    packet = PacketBuilder(BanchoPacketID.SRV_CHANNEL_INFO_END)
     packet.write_u32(0)
     return packet.finish()
 
 
 def bancho_silence_end_packet(silence_end: int) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_SILENCE_END)
+    packet = PacketBuilder(BanchoPacketID.SRV_SILENCE_END)
     packet.write_u32(silence_end)
     return packet.finish()
 
 
 def bancho_login_perms_packet(privileges: int) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_PRIVILEGES)
+    packet = PacketBuilder(BanchoPacketID.SRV_PRIVILEGES)
     packet.write_u32(privileges)
     return packet.finish()
 
 
 def bancho_user_presence_packet(user: User) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_USER_PRESENCE)
+    packet = PacketBuilder(BanchoPacketID.SRV_USER_PRESENCE)
     packet.write_i32(user.user_id)
     packet.write_string(user.username)
-    packet.write_u8(user.timezone_offset + 24)
-    packet.write_u8(COUNTRY_CODES[user.country.lower()])
+    packet.write_u8(user.utc_offset + 24)
+    packet.write_u8(user.geoloc.country_code)
     packet.write_u8(user.privileges)
-    packet.write_f32(user.coordinates[1])
-    packet.write_f32(user.coordinates[0])
-    packet.write_i32(user.stats[user.status.mode].rank)
+    packet.write_f32(user.geoloc.longitude)
+    packet.write_f32(user.geoloc.latitude)
+    packet.write_i32(user.current_stats.rank)
     return packet.finish()
 
 
 def bancho_user_stats_packet(user: User) -> bytes:
-    packet = PacketBuilder(PacketID.SRV_USER_STATS)
-
-    current_stats = user.stats[user.status.mode]
-
+    packet = PacketBuilder(BanchoPacketID.SRV_USER_STATS)
     packet.write_i32(user.user_id)
     packet.write_u8(user.status.action.value)
     packet.write_string(user.status.action_text)
@@ -1170,119 +1251,93 @@ def bancho_user_stats_packet(user: User) -> bytes:
     packet.write_i32(user.status.mods.value)
     packet.write_u8(user.status.mode.value)
     packet.write_i32(user.status.beatmap_id)
-    packet.write_i64(current_stats.ranked_score)
-    packet.write_f32(current_stats.accuracy / 100)
-    packet.write_i32(current_stats.playcount)
-    packet.write_i64(current_stats.total_score)
-    packet.write_i32(current_stats.rank)
-    packet.write_i32(current_stats.pp)
+    packet.write_i64(user.current_stats.ranked_score)
+    packet.write_f32(user.current_stats.accuracy / 100)
+    packet.write_i32(user.current_stats.playcount)
+    packet.write_i64(user.current_stats.total_score)
+    packet.write_i32(user.current_stats.rank)
+    packet.write_i32(user.current_stats.pp)
 
     return packet.finish()
 
 
+def bancho_user_friends_packet(friends_list: list[int]) -> bytes:
+    packet = PacketBuilder(BanchoPacketID.SRV_FRIENDS_LIST)
+    packet.write_osu_list(friends_list)
+    return packet.finish()
+
+
+def bancho_server_restart_packet(ms: int) -> bytes:
+    packet = PacketBuilder(BanchoPacketID.SRV_RESTART)
+    packet.write_i32(ms)
+    return packet.finish()
+
+
+packet_handlers: dict[
+    BanchoPacketID, Callable[[BinaryReader, User], Awaitable[None]]
+] = {}
+
+
+def register_packet_handler(packet_id: BanchoPacketID) -> Callable:
+    def decorator(handler: Callable[[BinaryReader, User], Awaitable[None]]) -> Callable:
+        packet_handlers[packet_id] = handler
+        return handler
+
+    return decorator
+
+
+@register_packet_handler(BanchoPacketID.OSU_HEARTBEAT)
+async def handle_heartbeat(_: BinaryReader, __: User) -> None:
+    pass
+
+
+@register_packet_handler(BanchoPacketID.OSU_CHANGE_ACTION)
+async def handle_change_action(reader: BinaryReader, user: User) -> None:
+    user.status.action = BanchoAction(reader.read_u8())
+    user.status.action_text = reader.read_string()
+    user.status.action_md5 = reader.read_string()
+    user.status.mods = OsuMods(reader.read_i32())
+    user.status.mode = OsuMode(reader.read_u8())
+    user.status.beatmap_id = reader.read_i32()
+
+    # TODO: restricted check
+    broadcast_to_all(bancho_user_stats_packet(user))
+
+
 # Bancho Packets END
-
-
-# Bancho Constants START
-
-
-class Action(IntEnum):
-    IDLE = 0
-    AFK = 1
-    PLAYING = 2
-    EDITING = 3
-    MODDING = 4
-    MULTIPLAYER = 5
-    WATCHING = 6
-    UNKNOWN = 7
-    TESTING = 8
-    SUBMITTING = 9
-    PAUSED = 10
-    LOBBY = 11
-    MULTIPLAYING = 12
-    OSU_DIRECT = 13
-
-
-class Mode(IntEnum):
-    OSU = 0
-    TAIKO = 1
-    CTB = 2
-    MANIA = 3
-
-
-class Mods(IntFlag):
-    NOMOD = 0
-    NOFAIL = 1 << 0
-    EASY = 1 << 1
-    TOUCHSCREEN = 1 << 2
-    HIDDEN = 1 << 3
-    HARDROCK = 1 << 4
-    SUDDENDEATH = 1 << 5
-    DOUBLETIME = 1 << 6
-    RELAX = 1 << 7
-    HALFTIME = 1 << 8
-    NIGHTCORE = 1 << 9
-    FLASHLIGHT = 1 << 10
-    AUTOPLAY = 1 << 11
-    SPUNOUT = 1 << 12
-    AUTOPILOT = 1 << 13
-    PERFECT = 1 << 14
-    KEY4 = 1 << 15
-    KEY5 = 1 << 16
-    KEY6 = 1 << 17
-    KEY7 = 1 << 18
-    KEY8 = 1 << 19
-    FADEIN = 1 << 20
-    RANDOM = 1 << 21
-    CINEMA = 1 << 22
-    TARGET = 1 << 23
-    KEY9 = 1 << 24
-    KEYCOOP = 1 << 25
-    KEY1 = 1 << 26
-    KEY3 = 1 << 27
-    KEY2 = 1 << 28
-    SCOREV2 = 1 << 29
-    MIRROR = 1 << 30
-
-    SPEED_MODS = DOUBLETIME | NIGHTCORE | HALFTIME
-    GAME_CHANGING = RELAX | AUTOPILOT
-
-
-class BanchoPrivileges(IntFlag):
-    PLAYER = 1 << 0
-    MODERATOR = 1 << 1
-    SUPPORTER = 1 << 2
-    OWNER = 1 << 3
-    DEVELOPER = 1 << 4
-    TOURNAMENT = 1 << 5
-
-
-# Bancho Constants END
 
 
 # Bancho Models START
 
 
 @dataclass
+class UserGeolocalisation:
+    country_acronym: str
+    country_code: int
+    latitude: float
+    longitude: float
+
+
+@dataclass
 class UserStatistics:
-    total_score: int
-    ranked_score: int
-    pp: int
-    accuracy: float
-    playcount: int
-    playtime: int
-    max_combo: int
-    total_hits: int
-    rank: int
+    total_score: int = 0
+    ranked_score: int = 0
+    pp: int = 0
+    accuracy: float = 0.0
+    playcount: int = 0
+    playtime: int = 0
+    max_combo: int = 0
+    total_hits: int = 0
+    rank: int = 0
 
 
 @dataclass
 class UserStatus:
-    action: Action = Action.IDLE
+    action: BanchoAction = BanchoAction.IDLE
     action_text: str = ""
     action_md5: str = ""
-    mods: Mods = Mods.NOMOD
-    mode: Mode = Mode.OSU
+    mods: OsuMods = OsuMods.NOMOD
+    mode: OsuMode = OsuMode.OSU
     beatmap_id: int = 0
 
 
@@ -1291,75 +1346,70 @@ class User:
     user_id: int
     username: str
     username_safe: str
-    country: str
+
     osu_token: str
-    ip: str | None
+    osu_version: str
 
-    coordinates: tuple[float, float]
-    password_hash: str
-
-    timezone_offset: int
+    utc_offset: int
     pm_private: bool
     privileges: BanchoPrivileges
 
+    geoloc: UserGeolocalisation
+
     silence_end: int
-    supporter_end: int
-    creation_time: int
+    login_time: int
     latest_activity: int
 
     status: UserStatus = field(default_factory=UserStatus)
-    stats: dict[Mode, UserStatistics] = field(default_factory=dict)
+    stats: dict[OsuMode, UserStatistics] = field(
+        default_factory=lambda: {mode: UserStatistics() for mode in OsuMode}
+    )
+
+    friends: list[int] = field(default_factory=lambda: [1])  # Bot is always a friend.
 
     is_bot: bool = False
 
     _packet_queue = bytearray()
 
+    @property
+    def current_stats(self) -> UserStatistics:
+        return self.stats[self.status.mode]
+
     def presence_and_stats(self) -> bytes:
         return bancho_user_presence_packet(self) + bancho_user_stats_packet(self)
 
-    async def fetch_user_geoloc(self) -> None:
-        geoloc = await get_geoloc(self.ip)
-        self.country = geoloc["country_code"]
-        self.coordinates = (geoloc["latitude"], geoloc["longitude"])
+    def enqueue(self, data: bytes) -> None:
+        self._packet_queue += data
+
+    def dequeue(self) -> bytearray:
+        data = self._packet_queue.copy()
+        self._packet_queue.clear()
+        return data
 
 
-def create_new_user(
+# TODO: Database functionality
+def initialise_new_user(
     username: str,
-    password_hash: str,
-    ip: str | None,
-    timezone_offset: int,
+    osu_version: str,
+    utc_offset: int,
+    geoloc: UserGeolocalisation,
     pm_private: bool,
 ) -> User:
-
-    empty_stats = UserStatistics(
-        total_score=0,
-        ranked_score=0,
-        pp=0,
-        accuracy=0.0,
-        playcount=0,
-        playtime=0,
-        max_combo=0,
-        total_hits=0,
-        rank=0,
-    )
-
     return User(
         user_id=len(users_cache) + 2,
         username=username,
         username_safe=safe_string(username),
-        country="XX",
         osu_token=create_random_string(32),
-        ip=ip,
-        coordinates=(0, 0),
-        password_hash=password_hash,
-        timezone_offset=timezone_offset,
+        osu_version=osu_version,
+        utc_offset=utc_offset,
         pm_private=pm_private,
-        privileges=BanchoPrivileges.PLAYER | BanchoPrivileges.SUPPORTER,
+        privileges=BanchoPrivileges.PLAYER
+        | BanchoPrivileges.DEVELOPER
+        | BanchoPrivileges.SUPPORTER,
+        geoloc=geoloc,
         silence_end=0,
-        supporter_end=0,
-        creation_time=int(time.time()),
+        login_time=int(time.time()),
         latest_activity=int(time.time()),
-        stats={mode: empty_stats for mode in Mode},
     )
 
 
@@ -1370,31 +1420,44 @@ def create_new_user(
 
 
 class BanchoBot(User):
+
     def __init__(self) -> None:
         self.user_id = 1
         self.username = "Męski oszuścik"
         self.username_safe = safe_string(self.username)
-        self.country = "RO"
+
         self.osu_token = create_random_string(32)
+        self.osu_version = "bot"
 
-        self.coordinates = (39.01955903386848, 125.75276158057767) # Pyongyang, North Korea.
-        self.password_hash = "lol123xd"
-
-        self.timezone_offset = 2
+        self.utc_offset = 2
         self.pm_private = False
         self.privileges = BanchoPrivileges.PLAYER | BanchoPrivileges.DEVELOPER
 
+        self.geoloc = UserGeolocalisation(
+            country_acronym="RO",
+            country_code=COUNTRY_CODES["ro"],
+            # Pyongyang, North Korea.
+            latitude=39.039219,
+            longitude=125.762524,
+        )
+
         self.silence_end = 0
-        self.supporter_end = 0
-        self.creation_time = 0
+        self.login_time = int(time.time())
         self.latest_activity = int(time.time())
 
-        self.status = UserStatus()
-        self.status.action = Action.TESTING
-        self.status.action_text = "bad code"
+        self.status = UserStatus(
+            action=BanchoAction.TESTING,
+            action_text="users patience.",
+        )
 
-        self.stats = {}
-        self.stats[Mode.OSU] = UserStatistics(
+        self.is_bot = True
+
+    def enqueue(self, data: bytes) -> None:
+        pass
+
+    @property
+    def current_stats(self) -> UserStatistics:
+        return UserStatistics(
             total_score=0,
             ranked_score=0,
             pp=2137,
@@ -1406,45 +1469,8 @@ class BanchoBot(User):
             rank=0,
         )
 
-        self.is_bot = True
-
 
 # Bancho Bot END
-
-
-# Bancho geoloc helpers START
-
-
-class GeolocResponse(TypedDict):
-    country_code: str
-    latitude: float
-    longitude: float
-
-
-async def get_geoloc(ip: str | None) -> GeolocResponse:
-    http_client = HTTPClient()
-
-    response = await http_client.get(
-        f"http://ip-api.com/json/{ip}",
-        query_params={"fields": "status,countryCode,lat,lon"},
-    )
-    json_data = response.json()
-
-    if json_data["status"] == "fail":
-        return {  # Mumbai, India.
-            "country_code": "IN",
-            "latitude": 19.076090,
-            "longitude": 72.877426,
-        }
-
-    return {
-        "country_code": json_data["countryCode"],
-        "latitude": json_data["lat"],
-        "longitude": json_data["lon"],
-    }
-
-
-# Bancho geoloc helpers END
 
 
 # Bancho Cache START
@@ -1453,9 +1479,16 @@ async def get_geoloc(ip: str | None) -> GeolocResponse:
 users_id_lookup_cache: dict[int, str] = {}  # user_id: uuid
 users_cache: dict[str, User] = {}  # uuid: User
 
-bancho_bot = BanchoBot()
-users_id_lookup_cache[bancho_bot.user_id] = bancho_bot.osu_token
-users_cache[bancho_bot.osu_token] = bancho_bot
+
+def broadcast_to_all(data: bytes) -> None:
+    for user in users_cache.values():
+        user.enqueue(data)
+
+
+# TODO: extend this function
+async def add_user_globally(user: User) -> None:
+    users_id_lookup_cache[user.user_id] = user.osu_token
+    users_cache[user.osu_token] = user
 
 
 # Bancho Cache END
@@ -1464,7 +1497,14 @@ users_cache[bancho_bot.osu_token] = bancho_bot
 # Bancho HTTP Logic START
 
 
-bancho_router = Router("c.akatsuki.gg")  # funny meme
+bancho_router = Router(
+    {
+        "c.akatsuki.gg",
+        "ce.akatsuki.gg",
+        "c4.akatsuki.gg",
+        "c6.akatsuki.gg",
+    }
+)  # funny meme
 
 
 async def bancho_get(request: HTTPRequest) -> None:
@@ -1480,7 +1520,7 @@ async def bancho_post(request: HTTPRequest) -> None:
         return
 
     osu_token = request.headers.get("osu-token")
-    if not osu_token:  # handle empty header or no header
+    if osu_token is None:
         uuid, packets = await bancho_login_handler(request)
         await request.send_response(
             status_code=200,
@@ -1489,24 +1529,53 @@ async def bancho_post(request: HTTPRequest) -> None:
         )
         return
 
+    user = users_cache.get(osu_token)
+    if user is None:
+        await request.send_response(
+            status_code=200,
+            body=bancho_notification_packet("Server has restarted!")
+            + bancho_server_restart_packet(0),
+        )
+        return
+
+    reader = BinaryReader(request.body)
+    while len(reader):
+        packet_id, size = reader.read_osu_header()
+        packet_reader = BinaryReader(reader.read(size))
+
+        if packet_id in packet_handlers:
+            await packet_handlers[packet_id](packet_reader, user)
+        else:
+            warning(f"Unhandled packet ID {packet_id} from {user.username}")
+
+    user.latest_activity = int(time.time())
+
+    response = user.dequeue()
+    await request.send_response(
+        status_code=200,
+        body=response,
+    )
+
 
 async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
     username, password_hash, additional_data, _ = request.body.decode().split("\n")
-    osu_ver, timezone, _, client_hashes, allow_pms = additional_data.split("|")
-    # osu_hash, _, adapter_md5, osu_uninst, serial_md5, _ = client_hashes.split(":")
+    osu_ver, utc_offset, _, _, pm_private = additional_data.split("|")
 
-    ip = request.headers.get("x-real-ip")
+    geolocalisation = await get_user_geolocalisation(
+        request.headers.get("x-forwarded-for")
+    )
 
     # Ok so for now we are doing database-less login.
+    # TODO: Implement database login
     packet_response = bytearray()
-    user = create_new_user(
+
+    user = initialise_new_user(
         username,
-        password_hash,
-        ip,
-        int(timezone),
-        allow_pms == "1",
+        osu_ver,
+        int(utc_offset),
+        geolocalisation,
+        pm_private == "1",
     )
-    await user.fetch_user_geoloc()
 
     packet_response += bancho_login_reply_packet(user.user_id)
     packet_response += bancho_protocol_packet()
@@ -1518,12 +1587,11 @@ async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
         packet_response += online_user.presence_and_stats()
 
     packet_response += user.presence_and_stats()
+    packet_response += bancho_user_friends_packet(user.friends)
 
     packet_response += bancho_notification_packet("onecho! - because it's that simple!")
 
-    users_id_lookup_cache[user.user_id] = user.osu_token
-    users_cache[user.osu_token] = user
-
+    await add_user_globally(user)
     return user.osu_token, packet_response
 
 
@@ -1543,6 +1611,11 @@ async def bancho_root_handler(request: HTTPRequest) -> None:
 
 
 async def main() -> int:
+    # Initialise bot
+    bancho_bot = BanchoBot()
+    await add_user_globally(bancho_bot)
+
+    # Initialise server
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
     server.add_router(bancho_router)
 
