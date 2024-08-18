@@ -37,7 +37,7 @@ Packets:
 - [x] Packet registration decorator
 
 Bancho:
-- [] User Login
+- [ ] User Login
 - [x] User Actions
 - [ ] Private Chat
 - [ ] Public Chat
