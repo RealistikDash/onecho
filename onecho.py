@@ -10,16 +10,6 @@ import random
 import string
 import struct
 import traceback
-from typing import (
-    Any,
-    Iterator,
-    TypeVar,
-    Union,
-    Callable,
-    Awaitable,
-)
-from enum import IntEnum
-
 import urllib.parse
 import json
 import os
@@ -27,8 +17,27 @@ import time
 import sys
 import socket
 
-# Config Globals
+from typing import Any
+from typing import Iterator
+from typing import TypeVar
+from typing import Union
+from typing import Callable
+from typing import Awaitable
+from enum import IntEnum, IntFlag
+from dataclasses import dataclass, field
+
+# Config Globals START
+
+
 DEBUG = "debug" in sys.argv
+
+
+# Config Globals END
+
+
+# HTTP Constants START
+
+
 STATUS_CODE = {
     100: "Continue",
     101: "Switching Protocols",
@@ -74,7 +83,57 @@ STATUS_CODE = {
 }
 
 
-# Logger
+# HTTP Constants END
+
+
+# Osu Constants START
+
+
+# fmt: off
+COUNTRY_CODES = {
+    "oc": 1,   "eu": 2,   "ad": 3,   "ae": 4,   "af": 5,   "ag": 6,   "ai": 7,   "al": 8,
+    "am": 9,   "an": 10,  "ao": 11,  "aq": 12,  "ar": 13,  "as": 14,  "at": 15,  "au": 16,
+    "aw": 17,  "az": 18,  "ba": 19,  "bb": 20,  "bd": 21,  "be": 22,  "bf": 23,  "bg": 24,
+    "bh": 25,  "bi": 26,  "bj": 27,  "bm": 28,  "bn": 29,  "bo": 30,  "br": 31,  "bs": 32,
+    "bt": 33,  "bv": 34,  "bw": 35,  "by": 36,  "bz": 37,  "ca": 38,  "cc": 39,  "cd": 40,
+    "cf": 41,  "cg": 42,  "ch": 43,  "ci": 44,  "ck": 45,  "cl": 46,  "cm": 47,  "cn": 48,
+    "co": 49,  "cr": 50,  "cu": 51,  "cv": 52,  "cx": 53,  "cy": 54,  "cz": 55,  "de": 56,
+    "dj": 57,  "dk": 58,  "dm": 59,  "do": 60,  "dz": 61,  "ec": 62,  "ee": 63,  "eg": 64,
+    "eh": 65,  "er": 66,  "es": 67,  "et": 68,  "fi": 69,  "fj": 70,  "fk": 71,  "fm": 72,
+    "fo": 73,  "fr": 74,  "fx": 75,  "ga": 76,  "gb": 77,  "gd": 78,  "ge": 79,  "gf": 80,
+    "gh": 81,  "gi": 82,  "gl": 83,  "gm": 84,  "gn": 85,  "gp": 86,  "gq": 87,  "gr": 88,
+    "gs": 89,  "gt": 90,  "gu": 91,  "gw": 92,  "gy": 93,  "hk": 94,  "hm": 95,  "hn": 96,
+    "hr": 97,  "ht": 98,  "hu": 99,  "id": 100, "ie": 101, "il": 102, "in": 103, "io": 104,
+    "iq": 105, "ir": 106, "is": 107, "it": 108, "jm": 109, "jo": 110, "jp": 111, "ke": 112,
+    "kg": 113, "kh": 114, "ki": 115, "km": 116, "kn": 117, "kp": 118, "kr": 119, "kw": 120,
+    "ky": 121, "kz": 122, "la": 123, "lb": 124, "lc": 125, "li": 126, "lk": 127, "lr": 128,
+    "ls": 129, "lt": 130, "lu": 131, "lv": 132, "ly": 133, "ma": 134, "mc": 135, "md": 136,
+    "mg": 137, "mh": 138, "mk": 139, "ml": 140, "mm": 141, "mn": 142, "mo": 143, "mp": 144,
+    "mq": 145, "mr": 146, "ms": 147, "mt": 148, "mu": 149, "mv": 150, "mw": 151, "mx": 152,
+    "my": 153, "mz": 154, "na": 155, "nc": 156, "ne": 157, "nf": 158, "ng": 159, "ni": 160,
+    "nl": 161, "no": 162, "np": 163, "nr": 164, "nu": 165, "nz": 166, "om": 167, "pa": 168,
+    "pe": 169, "pf": 170, "pg": 171, "ph": 172, "pk": 173, "pl": 174, "pm": 175, "pn": 176,
+    "pr": 177, "ps": 178, "pt": 179, "pw": 180, "py": 181, "qa": 182, "re": 183, "ro": 184,
+    "ru": 185, "rw": 186, "sa": 187, "sb": 188, "sc": 189, "sd": 190, "se": 191, "sg": 192,
+    "sh": 193, "si": 194, "sj": 195, "sk": 196, "sl": 197, "sm": 198, "sn": 199, "so": 200,
+    "sr": 201, "st": 202, "sv": 203, "sy": 204, "sz": 205, "tc": 206, "td": 207, "tf": 208,
+    "tg": 209, "th": 210, "tj": 211, "tk": 212, "tm": 213, "tn": 214, "to": 215, "tl": 216,
+    "tr": 217, "tt": 218, "tv": 219, "tw": 220, "tz": 221, "ua": 222, "ug": 223, "um": 224,
+    "us": 225, "uy": 226, "uz": 227, "va": 228, "vc": 229, "ve": 230, "vg": 231, "vi": 232,
+    "vn": 233, "vu": 234, "wf": 235, "ws": 236, "ye": 237, "yt": 238, "rs": 239, "za": 240,
+    "zm": 241, "me": 242, "zw": 243, "xx": 244, "a2": 245, "o1": 246, "ax": 247, "gg": 248,
+    "im": 249, "je": 250, "bl": 251, "mf": 252,
+}
+# fmt: on
+
+NEXT_USER_ID = 3
+
+# Osu Constants END
+
+
+# Logger START
+
+
 class Ansi(IntEnum):
     BLACK = 30
     RED = 31
@@ -127,7 +186,10 @@ def debug(text: str):
 
 # Logger END
 
-# Database
+
+# Database START
+
+
 JsonTypes = Union[str, int, dict]
 JsonIndexes = Union[str, int]
 JsonLike = Union[dict[JsonIndexes, JsonTypes], list[JsonTypes]]
@@ -305,16 +367,22 @@ class JSONDatabase:
 
 
 # Database END
-# Shared state
+
+
+# Shared state START
+
 
 user_db = JSONDatabase(
     ["username"],
     "user_db.json",
 )
 
+
 # Shared state END
 
-# HTTP Server
+
+# HTTP Server START
+
 
 T = TypeVar("T")
 
@@ -360,7 +428,7 @@ class CaseInsensitiveDict[T]:
     def keys(self) -> tuple:
         return tuple(self._dict.keys())
 
-    def get(self, key: str, default: T) -> T:
+    def get(self, key: str, default: T | None = None) -> T | None:
         return self._dict.get(key.lower(), default)
 
 
@@ -484,7 +552,10 @@ class HTTPRequest:
                 self._client, content_len - len(self.body)
             )
 
-        content_type = self.headers.get("Content-Type", "")
+        content_type = self.headers.get("Content-Type")
+        if content_type is None:
+            return
+
         if (
             content_type.startswith("multipart/form-data")
             or "form-data" in content_type
@@ -495,12 +566,12 @@ class HTTPRequest:
             self._parse_www_form()
 
 
-HTTP_HANDLER = Callable[[HTTPRequest], Awaitable[None]]
+HttpHandler = Callable[[HTTPRequest], Awaitable[None]]
 
 
 class Endpoint:
     def __init__(
-        self, path: str, handler: HTTP_HANDLER, methods: list[str] = ["GET"]
+        self, path: str, handler: HttpHandler, methods: list[str] = ["GET"]
     ) -> None:
         self.path = path
         self.handler = handler
@@ -526,7 +597,7 @@ class Router:
         return None
 
     def add_endpoint(self, path: str, methods: list[str] = ["GET"]) -> Callable:
-        def decorator(handler: HTTP_HANDLER) -> HTTP_HANDLER:
+        def decorator(handler: HttpHandler) -> HttpHandler:
             self.endpoints.add(Endpoint(path, handler, methods))
             return handler
 
@@ -541,8 +612,8 @@ class AsyncHTTPServer:
         self.on_start_server_coroutine: Callable[..., Awaitable[None]] | None = None
         self.on_close_server_coroutine: Callable[..., Awaitable[None]] | None = None
 
-        self.before_request_coroutines: list[HTTP_HANDLER] = []
-        self.after_request_coroutines: list[HTTP_HANDLER] = []
+        self.before_request_coroutines: list[HttpHandler] = []
+        self.after_request_coroutines: list[HttpHandler] = []
 
         self.routes: set[Router] = set()
 
@@ -647,7 +718,8 @@ class AsyncHTTPServer:
 
 # HTTP Server END
 
-# HTTP Responses
+
+# HTTP Responses START
 
 
 async def response_404(request: HTTPRequest) -> None:
@@ -675,277 +747,26 @@ async def response_500(request: HTTPRequest) -> None:
 
 # HTTP Responses END
 
+
 # String Helpers
 
 
 def safe_string(s: str) -> str:
     return s.lower().strip().replace(" ", "_")
 
+
 def create_random_string(n: int) -> str:
-    return "".join([random.choice(string.ascii_letters + string.digits) for _ in range(n)])
+    return "".join(
+        [random.choice(string.ascii_letters + string.digits) for _ in range(n)]
+    )
 
 
 # String Helpers END
 
-# Bancho custom country enums
 
-COUNTRY_DICT = {
-    "IO": 104,
-    "PS": 178,
-    "LV": 132,
-    "GI": 82,
-    "MZ": 154,
-    "BZ": 37,
-    "TR": 217,
-    "CV": 52,
-    "BI": 26,
-    "CM": 47,
-    "JM": 109,
-    "GU": 91,
-    "CY": 54,
-    "BW": 35,
-    "KW": 120,
-    "MY": 153,
-    "SH": 193,
-    "PG": 171,
-    "PW": 180,
-    "FM": 72,
-    "HR": 97,
-    "YT": 238,
-    "JO": 110,
-    "HK": 94,
-    "MW": 151,
-    "AZ": 18,
-    "IQ": 105,
-    "DO": 60,
-    "RS": 239,
-    "PK": 173,
-    "BR": 31,
-    "SN": 199,
-    "LI": 126,
-    "CD": 40,
-    "MG": 137,
-    "PE": 169,
-    "CK": 45,
-    "SJ": 195,
-    "SZ": 205,
-    "PM": 175,
-    "LY": 133,
-    "BV": 34,
-    "KN": 117,
-    "GR": 88,
-    "CC": 39,
-    "IN": 103,
-    "DZ": 61,
-    "SK": 196,
-    "VC": 229,
-    "GW": 92,
-    "BQ": 0,
-    "UM": 224,
-    "AF": 5,
-    "TZ": 221,
-    "AO": 11,
-    "AW": 17,
-    "AE": 0,
-    "PF": 170,
-    "MK": 139,
-    "AR": 13,
-    "AQ": 12,
-    "SL": 197,
-    "HT": 98,
-    "NF": 158,
-    "SS": 190,
-    "MU": 149,
-    "VA": 228,
-    "EC": 62,
-    "LC": 125,
-    "MX": 152,
-    "CW": 0,
-    "LT": 130,
-    "GN": 85,
-    "ZM": 241,
-    "LU": 131,
-    "NG": 159,
-    "MS": 147,
-    "MV": 150,
-    "DJ": 57,
-    "MQ": 145,
-    "IE": 101,
-    "CG": 40,
-    "LK": 127,
-    "NZ": 166,
-    "KR": 119,
-    "RO": 184,
-    "KE": 112,
-    "MF": 252,
-    "SR": 201,
-    "PA": 168,
-    "KI": 115,
-    "NL": 161,
-    "DM": 59,
-    "TC": 206,
-    "KZ": 122,
-    "CR": 50,
-    "NR": 164,
-    "UZ": 227,
-    "GE": 79,
-    "KP": 118,
-    "PN": 176,
-    "BY": 36,
-    "NI": 160,
-    "IR": 106,
-    "VI": 232,
-    "MA": 134,
-    "NO": 162,
-    "PT": 179,
-    "PY": 181,
-    "CU": 51,
-    "SC": 189,
-    "TT": 218,
-    "CA": 38,
-    "IT": 108,
-    "GF": 80,
-    "CN": 48,
-    "GQ": 87,
-    "LR": 128,
-    "BA": 19,
-    "TD": 207,
-    "AU": 16,
-    "MM": 141,
-    "HU": 99,
-    "EG": 64,
-    "JE": 250,
-    "IL": 102,
-    "BL": 251,
-    "BS": 32,
-    "SE": 191,
-    "MC": 135,
-    "SD": 190,
-    "ZA": 240,
-    "IM": 249,
-    "MO": 143,
-    "GL": 83,
-    "TV": 219,
-    "FK": 71,
-    "GB": 77,
-    "NA": 155,
-    "AM": 9,
-    "WS": 236,
-    "UY": 226,
-    "EE": 63,
-    "TL": 216,
-    "BT": 33,
-    "VU": 234,
-    "WF": 235,
-    "AX": 247,
-    "TK": 212,
-    "MN": 142,
-    "SB": 188,
-    "XK": 0,
-    "BH": 25,
-    "ID": 100,
-    "SV": 203,
-    "TG": 209,
-    "BF": 23,
-    "GG": 248,
-    "IS": 107,
-    "FJ": 70,
-    "KG": 113,
-    "BD": 21,
-    "ZW": 243,
-    "AI": 7,
-    "NP": 163,
-    "KH": 114,
-    "BJ": 27,
-    "EH": 65,
-    "BE": 22,
-    "SM": 198,
-    "CX": 53,
-    "TW": 220,
-    "KM": 116,
-    "AS": 14,
-    "AT": 15,
-    "LA": 123,
-    "US": 225,
-    "SY": 204,
-    "SO": 200,
-    "AD": 3,
-    "OM": 167,
-    "GT": 90,
-    "CF": 41,
-    "GY": 93,
-    "VN": 233,
-    "VE": 230,
-    "PH": 172,
-    "TM": 213,
-    "VG": 231,
-    "GP": 86,
-    "CZ": 55,
-    "GM": 84,
-    "MR": 146,
-    "TN": 214,
-    "SI": 194,
-    "TO": 215,
-    "UG": 223,
-    "SA": 187,
-    "ST": 202,
-    "QA": 182,
-    "FI": 69,
-    "CO": 49,
-    "AG": 6,
-    "PR": 177,
-    "PL": 174,
-    "GH": 81,
-    "GA": 76,
-    "TJ": 211,
-    "SX": 0,
-    "KY": 121,
-    "BO": 30,
-    "UA": 222,
-    "MP": 144,
-    "TF": 208,
-    "LB": 124,
-    "MT": 148,
-    "FR": 74,
-    "JP": 111,
-    "RU": 185,
-    "RW": 186,
-    "NC": 156,
-    "NE": 157,
-    "BN": 29,
-    "CI": 44,
-    "TH": 210,
-    "DE": 56,
-    "ET": 68,
-    "FO": 73,
-    "YE": 237,
-    "DK": 58,
-    "BG": 24,
-    "GS": 89,
-    "HM": 95,
-    "BB": 20,
-    "BM": 28,
-    "ML": 140,
-    "SG": 192,
-    "GD": 78,
-    "NU": 165,
-    "RE": 183,
-    "LS": 129,
-    "ER": 66,
-    "ME": 242,
-    "HN": 96,
-    "AL": 8,
-    "CH": 43,
-    "MD": 136,
-    "ES": 67,
-    "CL": 46,
-    "MH": 138,
-}
-
-# Bancho custom country enums END
+# Bancho Packets START
 
 
-# Bancho Packets
 class PacketID(IntEnum):
     OSU_CHANGE_ACTION = 0
     OSU_SEND_PUBLIC_MESSAGE = 1
@@ -1252,66 +1073,279 @@ def bancho_login_perms_packet(privileges: int) -> bytes:
     return packet.finish()
 
 
-def bancho_user_presence_packet(
-    user_id: int,
-    username: str,
-    timezone_offset: int,
-    country_enum: int,
-    privileges: int,
-    longitude: float,
-    latitude: float,
-    rank: int,
-) -> bytes:
+def bancho_user_presence_packet(user: User) -> bytes:
     packet = PacketBuilder(PacketID.SRV_USER_PRESENCE)
-    packet.write_i32(user_id)
-    packet.write_string(username)
-    packet.write_u8(timezone_offset + 24)
-    packet.write_u8(country_enum)
-    packet.write_u8(privileges)
-    packet.write_f32(longitude)
-    packet.write_f32(latitude)
-    packet.write_i32(rank)
+    packet.write_i32(user.user_id)
+    packet.write_string(user.username)
+    packet.write_u8(user.timezone_offset + 24)
+    packet.write_u8(COUNTRY_CODES[user.country.lower()])
+    packet.write_u8(user.privileges)
+    packet.write_f32(user.coordinates[0])
+    packet.write_f32(user.coordinates[1])
+    packet.write_i32(user.stats[user.status.mode].rank)
     return packet.finish()
 
 
-def bancho_user_stats_packet(
-    user_id: int,
-    action_id: int,
-    action_text: str,
-    action_md5: str,
-    action_mods: int,
-    mode: int,
-    action_map_id: int,
-    ranked_score: int,
-    accuracy: float,
-    playcount: int,
-    total_score: int,
-    rank: int,
-    pp: int,
-) -> bytes:
+def bancho_user_stats_packet(user: User) -> bytes:
     packet = PacketBuilder(PacketID.SRV_USER_STATS)
-    packet.write_i32(user_id)
-    packet.write_u8(action_id)
-    packet.write_string(action_text)
-    packet.write_string(action_md5)
-    packet.write_i32(action_mods)
-    packet.write_u8(mode)
-    packet.write_i32(action_map_id)
-    packet.write_i64(ranked_score)
-    packet.write_f32(accuracy / 100)
-    packet.write_i32(playcount)
-    packet.write_i64(total_score)
-    packet.write_i32(rank)
-    packet.write_i32(pp)
+
+    current_stats = user.stats[user.status.mode]
+
+    packet.write_i32(user.user_id)
+    packet.write_u8(user.status.action.value)
+    packet.write_string(user.status.action_text)
+    packet.write_string(user.status.action_md5)
+    packet.write_i32(user.status.mods.value)
+    packet.write_u8(user.status.mode.value)
+    packet.write_i32(user.status.beatmap_id)
+    packet.write_i64(current_stats.ranked_score)
+    packet.write_f32(current_stats.accuracy / 100)
+    packet.write_i32(current_stats.playcount)
+    packet.write_i64(current_stats.total_score)
+    packet.write_i32(current_stats.rank)
+    packet.write_i32(current_stats.pp)
+
     return packet.finish()
 
 
 # Bancho Packets END
 
-# Bancho HTTP Logic
+
+# Bancho Constants START
+
+
+class Action(IntEnum):
+    IDLE = 0
+    AFK = 1
+    PLAYING = 2
+    EDITING = 3
+    MODDING = 4
+    MULTIPLAYER = 5
+    WATCHING = 6
+    UNKNOWN = 7
+    TESTING = 8
+    SUBMITTING = 9
+    PAUSED = 10
+    LOBBY = 11
+    MULTIPLAYING = 12
+    OSU_DIRECT = 13
+
+
+class Mode(IntEnum):
+    OSU = 0
+    TAIKO = 1
+    CTB = 2
+    MANIA = 3
+
+
+class Mods(IntFlag):
+    NOMOD = 0
+    NOFAIL = 1 << 0
+    EASY = 1 << 1
+    TOUCHSCREEN = 1 << 2
+    HIDDEN = 1 << 3
+    HARDROCK = 1 << 4
+    SUDDENDEATH = 1 << 5
+    DOUBLETIME = 1 << 6
+    RELAX = 1 << 7
+    HALFTIME = 1 << 8
+    NIGHTCORE = 1 << 9
+    FLASHLIGHT = 1 << 10
+    AUTOPLAY = 1 << 11
+    SPUNOUT = 1 << 12
+    AUTOPILOT = 1 << 13
+    PERFECT = 1 << 14
+    KEY4 = 1 << 15
+    KEY5 = 1 << 16
+    KEY6 = 1 << 17
+    KEY7 = 1 << 18
+    KEY8 = 1 << 19
+    FADEIN = 1 << 20
+    RANDOM = 1 << 21
+    CINEMA = 1 << 22
+    TARGET = 1 << 23
+    KEY9 = 1 << 24
+    KEYCOOP = 1 << 25
+    KEY1 = 1 << 26
+    KEY3 = 1 << 27
+    KEY2 = 1 << 28
+    SCOREV2 = 1 << 29
+    MIRROR = 1 << 30
+
+    SPEED_MODS = DOUBLETIME | NIGHTCORE | HALFTIME
+    GAME_CHANGING = RELAX | AUTOPILOT
+
+
+class BanchoPrivileges(IntFlag):
+    PLAYER = 1 << 0
+    MODERATOR = 1 << 1
+    SUPPORTER = 1 << 2
+    OWNER = 1 << 3
+    DEVELOPER = 1 << 4
+    TOURNAMENT = 1 << 5
+
+
+# Bancho Constants END
+
+
+# Bancho Models START
+
+
+@dataclass
+class UserStatistics:
+    total_score: int
+    ranked_score: int
+    pp: int
+    accuracy: float
+    playcount: int
+    playtime: int
+    max_combo: int
+    total_hits: int
+    rank: int
+
+
+@dataclass
+class UserStatus:
+    action: Action = Action.IDLE
+    action_text: str = ""
+    action_md5: str = ""
+    mods: Mods = Mods.NOMOD
+    mode: Mode = Mode.OSU
+    beatmap_id: int = 0
+
+
+@dataclass
+class User:
+    user_id: int
+    username: str
+    username_safe: str
+    country: str
+    osu_token: str
+
+    coordinates: tuple[float, float]
+    password_hash: str
+
+    timezone_offset: int
+    pm_private: bool
+    privileges: BanchoPrivileges
+
+    silence_end: int
+    supporter_end: int
+    creation_time: int
+    latest_activity: int
+
+    status: UserStatus = field(default_factory=UserStatus)
+    stats: dict[Mode, UserStatistics] = field(default_factory=dict)
+
+    is_bot: bool = False
+
+    _packet_queue = bytearray()
+
+    def presence_and_stats(self) -> bytes:
+        return bancho_user_presence_packet(self) + bancho_user_stats_packet(self)
+
+
+def create_new_user(
+    username: str,
+    password_hash: str,
+    country: str,
+    timezone_offset: int,
+    pm_private: bool,
+) -> User:
+
+    empty_stats = UserStatistics(
+        total_score=0,
+        ranked_score=0,
+        pp=0,
+        accuracy=0.0,
+        playcount=0,
+        playtime=0,
+        max_combo=0,
+        total_hits=0,
+        rank=0,
+    )
+
+    return User(
+        user_id=len(users_cache) + 2,
+        username=username,
+        username_safe=safe_string(username),
+        country=country,
+        osu_token=create_random_string(32),
+        coordinates=(0, 0),  # TODO: geoloc
+        password_hash=password_hash,
+        timezone_offset=timezone_offset,
+        pm_private=pm_private,
+        privileges=BanchoPrivileges.PLAYER | BanchoPrivileges.SUPPORTER,
+        silence_end=0,
+        supporter_end=0,
+        creation_time=int(time.time()),
+        latest_activity=int(time.time()),
+        stats={mode: empty_stats for mode in Mode},
+    )
+
+
+# Bancho Models END
+
+
+# Bancho Bot START
+
+
+class BanchoBot(User):
+    def __init__(self) -> None:
+        self.user_id = 1
+        self.username = "Męski oszuścik"
+        self.username_safe = safe_string(self.username)
+        self.country = "RO"
+        self.osu_token = create_random_string(32)
+
+        self.coordinates = (39.01955903386848, 125.75276158057767)
+        self.password_hash = "lol123xd"
+
+        self.timezone_offset = 2
+        self.pm_private = False
+        self.privileges = BanchoPrivileges.PLAYER | BanchoPrivileges.DEVELOPER
+
+        self.silence_end = 0
+        self.supporter_end = 0
+        self.creation_time = 0
+        self.latest_activity = int(time.time())
+
+        self.status = UserStatus()
+        self.status.action = Action.TESTING
+        self.status.action_text = "bad code"
+
+        self.stats = {}
+        self.stats[Mode.OSU] = UserStatistics(
+            total_score=0,
+            ranked_score=0,
+            pp=2137,
+            accuracy=100.0,
+            playcount=0,
+            playtime=0,
+            max_combo=0,
+            total_hits=0,
+            rank=0,
+        )
+
+        self.is_bot = True
+
+
+# Bancho Cache START
+
+users_id_lookup_cache: dict[int, str] = {}  # user_id: uuid
+users_cache: dict[str, User] = {}  # uuid: User
+
+bancho_bot = BanchoBot()
+users_id_lookup_cache[bancho_bot.user_id] = bancho_bot.osu_token
+users_cache[bancho_bot.osu_token] = bancho_bot
+
+# Bancho Cache END
+
+
+# Bancho HTTP Logic START
+
 
 bancho_router = Router("c.akatsuki.gg")  # funny meme
-USERS = {}
 
 
 async def bancho_get(request: HTTPRequest) -> None:
@@ -1326,8 +1360,8 @@ async def bancho_post(request: HTTPRequest) -> None:
         await bancho_get(request)
         return
 
-    osu_token = request.headers.get("osu-token", "")
-    if not osu_token:
+    osu_token = request.headers.get("osu-token")
+    if not osu_token:  # handle empty header or no header
         uuid, packets = await bancho_login_handler(request)
         await request.send_response(
             status_code=200,
@@ -1339,41 +1373,36 @@ async def bancho_post(request: HTTPRequest) -> None:
 
 async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
     username, password_hash, additional_data, _ = request.body.decode().split("\n")
-    username_safe = safe_string(username)
-
     osu_ver, timezone, _, client_hashes, allow_pms = additional_data.split("|")
     # osu_hash, _, adapter_md5, osu_uninst, serial_md5, _ = client_hashes.split(":")
 
     # Ok so for now we are doing database-less login.
     packet_response = bytearray()
-    user_id = len(USERS) + 1
-    packet_response += bancho_login_reply_packet(user_id)
+    user = create_new_user(
+        username,
+        password_hash,
+        "PL",  # TODO: geoloc
+        int(timezone),
+        allow_pms == "1",
+    )
+
+    packet_response += bancho_login_reply_packet(user.user_id)
     packet_response += bancho_protocol_packet()
     packet_response += bancho_channel_info_end_packet()
-    packet_response += bancho_silence_end_packet(0)
-    packet_response += bancho_login_perms_packet(5)  # player + supporter
+    packet_response += bancho_silence_end_packet(user.silence_end)
+    packet_response += bancho_login_perms_packet(user.privileges)
 
-    # TODO: clean it LOL
-    user_rank = random.randint(1, 100)  # equal chances!
-    packet_response += bancho_user_presence_packet(
-        user_id,
-        username,
-        int(timezone),
-        COUNTRY_DICT["RO"],
-        5,  # player + supporter
-        39.01955903386848,
-        125.75276158057767,
-        user_rank,
-    )
-    packet_response += bancho_user_stats_packet(
-        user_id, 0, "", "", 0, 0, 0, 0, 100.0, 0, 0, user_rank, 69
-    )
+    for online_user in users_cache.values():
+        packet_response += online_user.presence_and_stats()
+
+    packet_response += user.presence_and_stats()
+
     packet_response += bancho_notification_packet("onecho! - because it's that simple!")
 
-    uuid = create_random_string(32)
-    USERS[uuid] = user_id
+    users_id_lookup_cache[user.user_id] = user.osu_token
+    users_cache[user.osu_token] = user
 
-    return uuid, packet_response
+    return user.osu_token, packet_response
 
 
 @bancho_router.add_endpoint("/", methods=["GET", "POST"])
@@ -1387,7 +1416,8 @@ async def bancho_root_handler(request: HTTPRequest) -> None:
 
 # Bancho HTTP Logic END
 
-# Server Entry Point
+
+# Server Entry Point START
 
 
 async def main() -> int:
@@ -1408,5 +1438,6 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
+
 
 # Server Entry Point END
