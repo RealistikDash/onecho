@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-from functools import cache, cached_property
 import random
 import string
 import struct
@@ -30,7 +29,8 @@ from typing import Awaitable
 
 from enum import IntEnum
 from enum import IntFlag
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 # Global Constants START
 
