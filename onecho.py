@@ -19,6 +19,7 @@ import sys
 import socket
 
 from typing import Any
+from typing import TypedDict
 from typing import Iterator
 from typing import TypeVar
 from typing import Union
@@ -128,6 +129,7 @@ COUNTRY_CODES = {
 # fmt: on
 
 NEXT_USER_ID = 3
+
 
 # Osu Constants END
 
@@ -1150,8 +1152,8 @@ def bancho_user_presence_packet(user: User) -> bytes:
     packet.write_u8(user.timezone_offset + 24)
     packet.write_u8(COUNTRY_CODES[user.country.lower()])
     packet.write_u8(user.privileges)
-    packet.write_f32(user.coordinates[0])
     packet.write_f32(user.coordinates[1])
+    packet.write_f32(user.coordinates[0])
     packet.write_i32(user.stats[user.status.mode].rank)
     return packet.finish()
 
@@ -1291,6 +1293,7 @@ class User:
     username_safe: str
     country: str
     osu_token: str
+    ip: str | None
 
     coordinates: tuple[float, float]
     password_hash: str
@@ -1314,11 +1317,16 @@ class User:
     def presence_and_stats(self) -> bytes:
         return bancho_user_presence_packet(self) + bancho_user_stats_packet(self)
 
+    async def fetch_user_geoloc(self) -> None:
+        geoloc = await get_geoloc(self.ip)
+        self.country = geoloc["country_code"]
+        self.coordinates = (geoloc["latitude"], geoloc["longitude"])
+
 
 def create_new_user(
     username: str,
     password_hash: str,
-    country: str,
+    ip: str | None,
     timezone_offset: int,
     pm_private: bool,
 ) -> User:
@@ -1339,9 +1347,10 @@ def create_new_user(
         user_id=len(users_cache) + 2,
         username=username,
         username_safe=safe_string(username),
-        country=country,
+        country="XX",
         osu_token=create_random_string(32),
-        coordinates=(0, 0),  # TODO: geoloc
+        ip=ip,
+        coordinates=(0, 0),
         password_hash=password_hash,
         timezone_offset=timezone_offset,
         pm_private=pm_private,
@@ -1368,7 +1377,7 @@ class BanchoBot(User):
         self.country = "RO"
         self.osu_token = create_random_string(32)
 
-        self.coordinates = (39.01955903386848, 125.75276158057767)
+        self.coordinates = (39.01955903386848, 125.75276158057767) # Pyongyang, North Korea.
         self.password_hash = "lol123xd"
 
         self.timezone_offset = 2
@@ -1400,7 +1409,46 @@ class BanchoBot(User):
         self.is_bot = True
 
 
+# Bancho Bot END
+
+
+# Bancho geoloc helpers START
+
+
+class GeolocResponse(TypedDict):
+    country_code: str
+    latitude: float
+    longitude: float
+
+
+async def get_geoloc(ip: str | None) -> GeolocResponse:
+    http_client = HTTPClient()
+
+    response = await http_client.get(
+        f"http://ip-api.com/json/{ip}",
+        query_params={"fields": "status,countryCode,lat,lon"},
+    )
+    json_data = response.json()
+
+    if json_data["status"] == "fail":
+        return {  # Mumbai, India.
+            "country_code": "IN",
+            "latitude": 19.076090,
+            "longitude": 72.877426,
+        }
+
+    return {
+        "country_code": json_data["countryCode"],
+        "latitude": json_data["lat"],
+        "longitude": json_data["lon"],
+    }
+
+
+# Bancho geoloc helpers END
+
+
 # Bancho Cache START
+
 
 users_id_lookup_cache: dict[int, str] = {}  # user_id: uuid
 users_cache: dict[str, User] = {}  # uuid: User
@@ -1408,6 +1456,7 @@ users_cache: dict[str, User] = {}  # uuid: User
 bancho_bot = BanchoBot()
 users_id_lookup_cache[bancho_bot.user_id] = bancho_bot.osu_token
 users_cache[bancho_bot.osu_token] = bancho_bot
+
 
 # Bancho Cache END
 
@@ -1446,15 +1495,18 @@ async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
     osu_ver, timezone, _, client_hashes, allow_pms = additional_data.split("|")
     # osu_hash, _, adapter_md5, osu_uninst, serial_md5, _ = client_hashes.split(":")
 
+    ip = request.headers.get("x-real-ip")
+
     # Ok so for now we are doing database-less login.
     packet_response = bytearray()
     user = create_new_user(
         username,
         password_hash,
-        "PL",  # TODO: geoloc
+        ip,
         int(timezone),
         allow_pms == "1",
     )
+    await user.fetch_user_geoloc()
 
     packet_response += bancho_login_reply_packet(user.user_id)
     packet_response += bancho_protocol_packet()
