@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import struct
 import traceback
 from typing import (
     Any,
@@ -672,19 +673,360 @@ async def response_500(request: HTTPRequest) -> None:
 
 # HTTP Responses END
 
+# String Helpers
+
+
+def safe_string(s: str) -> str:
+    return s.lower().strip().replace(" ", "_")
+
+
+# String Helpers END
+
+
+# Bancho Packets
+class PacketID(IntEnum):
+    OSU_CHANGE_ACTION = 0
+    OSU_SEND_PUBLIC_MESSAGE = 1
+    OSU_LOGOUT = 2
+    OSU_REQUEST_STATUS_UPDATE = 3
+    OSU_HEARTBEAT = 4
+    SRV_LOGIN_REPLY = 5
+    SRV_SEND_MESSAGE = 7
+    SRV_HEARTBEAT = 8
+    SRV_USER_STATS = 11
+    SRV_USER_LOGOUT = 12
+    SRV_SPECTATOR_JOINED = 13
+    SRV_SPECTATOR_LEFT = 14
+    SRV_SPECTATE_FRAMES = 15
+    OSU_START_SPECTATING = 16
+    OSU_STOP_SPECTATING = 17
+    OSU_SPECTATE_FRAMES = 18
+    SRV_VERSION_UPDATE = 19
+    OSU_ERROR_REPORT = 20
+    OSU_CANT_SPECTATE = 21
+    SRV_SPECTATOR_CANT_SPECTATE = 22
+    SRV_GET_ATTENTION = 23
+    SRV_NOTIFICATION = 24
+    OSU_SEND_PRIVATE_MESSAGE = 25
+    SRV_UPDATE_MATCH = 26
+    SRV_NEW_MATCH = 27
+    SRV_DISPOSE_MATCH = 28
+    OSU_PART_LOBBY = 29
+    OSU_JOIN_LOBBY = 30
+    OSU_CREATE_MATCH = 31
+    OSU_JOIN_MATCH = 32
+    OSU_PART_MATCH = 33
+    SRV_TOGGLE_BLOCK_NON_FRIEND_DMS = 34
+    SRV_MATCH_JOIN_SUCCESS = 36
+    SRV_MATCH_JOIN_FAIL = 37
+    OSU_MATCH_CHANGE_SLOT = 38
+    OSU_MATCH_READY = 39
+    OSU_MATCH_LOCK = 40
+    OSU_MATCH_CHANGE_SETTINGS = 41
+    SRV_FELLOW_SPECTATOR_JOINED = 42
+    SRV_FELLOW_SPECTATOR_LEFT = 43
+    OSU_MATCH_START = 44
+    SRV_ALL_PLAYERS_LOADED = 45
+    SRV_MATCH_START = 46
+    OSU_MATCH_SCORE_UPDATE = 47
+    SRV_MATCH_SCORE_UPDATE = 48
+    OSU_MATCH_COMPLETE = 49
+    SRV_MATCH_TRANSFER_HOST = 50
+    OSU_MATCH_CHANGE_MODS = 51
+    OSU_MATCH_LOAD_COMPLETE = 52
+    SRV_MATCH_ALL_PLAYERS_LOADED = 53
+    OSU_MATCH_NO_BEATMAP = 54
+    OSU_MATCH_UNREADY = 55
+    OSU_MATCH_FAILED = 56
+    SRV_MATCH_PLAYER_FAILED = 57
+    SRV_MATCH_COMPLETE = 58
+    OSU_MATCH_HAS_BEATMAP = 59
+    OSU_MATCH_SKIP_REQUEST = 60
+    SRV_MATCH_SKIP = 61
+    OSU_CHANNEL_JOIN = 63
+    SRV_CHANNEL_JOIN_SUCCESS = 64
+    SRV_CHANNEL_INFO = 65
+    SRV_CHANNEL_KICK = 66
+    SRV_CHANNEL_AUTO_JOIN = 67
+    OSU_BEATMAP_INFO_REQUEST = 68
+    SRV_BEATMAP_INFO_REPLY = 69
+    OSU_MATCH_TRANSFER_HOST = 70
+    SRV_PRIVILEGES = 71
+    SRV_FRIENDS_LIST = 72
+    OSU_FRIEND_ADD = 73
+    OSU_FRIEND_REMOVE = 74
+    SRV_PROTOCOL_VERSION = 75
+    SRV_MAIN_MENU_ICON = 76
+    OSU_MATCH_CHANGE_TEAM = 77
+    OSU_CHANNEL_PART = 78
+    OSU_RECEIVE_UPDATES = 79
+    SRV_MATCH_PLAYER_SKIPPED = 81
+    OSU_SET_AWAY_MESSAGE = 82
+    SRV_USER_PRESENCE = 83
+    OSU_USER_STATS_REQUEST = 85
+    SRV_RESTART = 86
+    OSU_MATCH_INVITE = 87
+    SRV_MATCH_INVITE = 88
+    SRV_CHANNEL_INFO_END = 89
+    OSU_MATCH_CHANGE_PASSWORD = 90
+    SRV_MATCH_CHANGE_PASSWORD = 91
+    SRV_SILENCE_END = 92
+    OSU_TOURNAMENT_MATCH_INFO_REQUEST = 93
+    SRV_USER_SILENCED = 94
+    SRV_USER_PRESENCE_SINGLE = 95
+    SRV_USER_PRESENCE_BUNDLE = 96
+    OSU_USER_PRESENCE_REQUEST = 97
+    OSU_USER_PRESENCE_REQUEST_ALL = 98
+    OSU_TOGGLE_BLOCK_NON_FRIEND_DMS = 99
+    SRV_USER_DM_BLOCKED = 100
+    SRV_TARGET_IS_SILENCED = 101
+    SRV_VERSION_UPDATE_FORCED = 102
+    SRV_SWITCH_SERVER = 103
+    SRV_ACCOUNT_RESTRICTED = 104
+    SRV_RTX = 105
+    SRV_MATCH_ABORT = 106
+    SRV_SWITCH_TOURNAMENT_SERVER = 107
+    OSU_TOURNAMENT_JOIN_MATCH_CHANNEL = 108
+    OSU_TOURNAMENT_LEAVE_MATCH_CHANNEL = 109
+
+
+class BinaryReader:
+    def __init__(self, bytes_data: bytearray) -> None:
+        self.__buffer = bytes_data
+        self.__offset = 0
+
+    def __len__(self) -> int:
+        return len(self.__buffer)
+
+    def read(self, offset: int = -1) -> bytes:
+        if offset < 0:
+            offset = len(self.__buffer) - self.__offset
+
+        data = self.__buffer[self.__offset : self.__offset + offset]
+        self.__offset += offset
+        return data
+
+    def read_int(self, size: int, signed: bool) -> int:
+        return int.from_bytes(
+            self.read(size),
+            byteorder="little",
+            signed=signed,
+        )
+
+    def read_u8(self) -> int:
+        return self.read_int(1, False)
+
+    def read_u16(self) -> int:
+        return self.read_int(2, False)
+
+    def read_i16(self) -> int:
+        return self.read_int(2, True)
+
+    def read_u32(self) -> int:
+        return self.read_int(4, False)
+
+    def read_i32(self) -> int:
+        return self.read_int(4, True)
+
+    def read_u64(self) -> int:
+        return self.read_int(8, False)
+
+    def read_i64(self) -> int:
+        return self.read_int(8, True)
+
+    def read_f32(self) -> float:
+        return struct.unpack("<f", self.read(4))[0]
+
+    def read_f64(self) -> float:
+        return struct.unpack("<f", self.read(8))[0]
+
+    def read_uleb128(self) -> int:
+        if self.read_u8() != 0x0B:
+            return 0
+
+        val = shift = 0
+        while True:
+            b = self.read_u8()
+            val |= (b & 0b01111111) << shift
+            if (b & 0b10000000) == 0:
+                break
+            shift += 7
+        return val
+
+    def read_string(self) -> str:
+        s_len = self.read_uleb128()
+        return self.read(s_len).decode()
+
+
+class BinaryWriter:
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+
+    def write_raw(self, data: bytes) -> BinaryWriter:
+        self.buffer += data
+        return self
+
+    def write_i8(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<b", data)
+        return self
+
+    def write_u8(self, data: int) -> BinaryWriter:
+        self.buffer.append(data)
+        return self
+
+    def write_i16(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<h", data)
+        return self
+
+    def write_u16(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<H", data)
+        return self
+
+    def write_i32(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<i", data)
+        return self
+
+    def write_u32(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<I", data)
+        return self
+
+    def write_i64(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<q", data)
+        return self
+
+    def write_u64(self, data: int) -> BinaryWriter:
+        self.buffer += struct.pack("<Q", data)
+        return self
+
+    def write_f32(self, data: float) -> BinaryWriter:
+        self.buffer += struct.pack("<f", data)
+        return self
+
+    def write_uleb128(self, data: int) -> BinaryWriter:
+        arr = bytearray()
+        length = 0
+
+        if data == 0:
+            self.write_raw(b"\x00")
+            return self
+
+        while data > 0:
+            arr.append(data & 127)
+            data >>= 7
+            if data != 0:
+                arr[length] |= 128
+            length += 1
+
+        self.write_raw(arr)
+        return self
+
+    def write_string(self, data: str) -> BinaryWriter:
+        if not data:
+            self.write_uleb128(0)
+            return self
+
+        str_bytes = data.encode("utf-8", "ignore")
+        self.write_raw(b"\x0B")
+        self.write_uleb128(len(str_bytes))
+        self.write_raw(str_bytes)
+        return self
+
+    def write_osu_list(self, data: list[int]) -> BinaryWriter:
+        self.write_u16(len(data))
+        for i in data:
+            self.write_i32(i)
+        return self
+
+
+class PacketBuilder(BinaryWriter):
+    def __init__(self, packet_id: PacketID) -> None:
+        self.packet_id = packet_id
+        super().__init__()
+
+    def finish(self) -> bytearray:
+        packet_bytes = bytearray()
+
+        packet_bytes += struct.pack("<h", self.packet_id)
+        packet_bytes += b"\x00"
+        packet_bytes += struct.pack("<l", len(self.buffer))
+        packet_bytes += self.buffer
+
+        return packet_bytes
+
+
+def bancho_notification_packet(message: str) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_NOTIFICATION)
+    packet.write_string(message)
+    return packet.finish()
+
+
+def bancho_login_reply_packet(user_id: int) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_LOGIN_REPLY)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+
+# Bancho Packets END
+
+# Bancho HTTP Logic
+
+bancho_router = Router("c.akatsuki.gg")  # funny meme
+
+
+async def bancho_get(request: HTTPRequest) -> None:
+    await request.send_response(
+        status_code=200,
+        body=b"onecho! - because it's that simple!",
+    )
+
+
+async def bancho_post(request: HTTPRequest) -> None:
+    if request.headers["user-agent"] != "osu!":
+        await bancho_get(request)
+        return
+
+    osu_token = request.headers.get("osu-token", "")
+    if not osu_token:
+        uuid, packets = await bancho_login_handler(request)
+        await request.send_response(
+            status_code=200,
+            headers={"cho-token": uuid},
+            body=packets,
+        )
+        return
+
+
+async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
+    username, password_hash, additional_data, _ = request.body.decode().split("\n")
+    username_safe = safe_string(username)
+
+    osu_ver, timezone, _, client_hashes, allow_pms = additional_data.split("|")
+    # osu_hash, _, adapter_md5, osu_uninst, serial_md5, _ = client_hashes.split(":")
+
+    packet_response = bytearray()
+    packet_response += bancho_login_reply_packet(-1)
+    packet_response += bancho_notification_packet("onecho! - because it's that simple!")
+
+    return "no", packet_response
+
+
+@bancho_router.add_endpoint("/", methods=["GET", "POST"])
+async def bancho_root_handler(request: HTTPRequest) -> None:
+    if request.method == "GET":
+        await bancho_get(request)
+        return
+
+    await bancho_post(request)
+
+
+# Bancho HTTP Logic END
+
+# Server Entry Point
+
 
 async def main() -> int:
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
-    router = Router("127.0.0.1:2137")
-
-    @router.add_endpoint("/")
-    async def index(request: HTTPRequest) -> None:
-        await request.send_response(
-            status_code=200,
-            body=b"Hello, world!",
-        )
-
-    server.add_router(router)
+    server.add_router(bancho_router)
 
     @server.on_start_server
     async def on_start_server() -> None:
@@ -700,3 +1042,5 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
+
+# Server Entry Point END

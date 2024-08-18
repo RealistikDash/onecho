@@ -30,9 +30,9 @@ HTTP:
 - [ ] Async HTTP Client
 
 Packets:
-- [ ] Binary Writer
-- [ ] Binary Reader
-- [ ] Builder API for writer
+- [x] Binary Writer
+- [x] Binary Reader
+- [x] Builder API for writer
 - [ ] Packet registration router
 - [ ] Packet registration decorator
 
