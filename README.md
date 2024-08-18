@@ -27,7 +27,7 @@ Database:
 HTTP:
 - [x] Async HTTP Server
 - [x] Host based domain routing
-- [ ] Async HTTP Client
+- [x] Async HTTP Client
 
 Packets:
 - [x] Binary Writer

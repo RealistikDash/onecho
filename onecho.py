@@ -10,6 +10,7 @@ import random
 import string
 import struct
 import traceback
+import urllib.request
 import urllib.parse
 import json
 import os
@@ -717,6 +718,75 @@ class AsyncHTTPServer:
 
 
 # HTTP Server END
+
+
+# HTTP Client START
+
+
+@dataclass
+class HTTPResponse:
+    url: str
+    status_code: int
+    http_version: int
+    headers: CaseInsensitiveDict[str]
+    body: bytes
+
+    @property
+    def text(self) -> str:
+        return self.body.decode("utf-8", errors="ignore")
+
+    def json(self):
+        return json.loads(self.body)
+
+
+class HTTPClient:
+    async def __make_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, Any],
+        query_params: dict[str, Any] = {},
+        body: bytes = b"",
+    ) -> HTTPResponse:
+        query_data = urllib.parse.urlencode(query_params)
+        if query_data:
+            url += f"?{query_data}"
+
+        req = urllib.request.Request(url, method=method, data=body, headers=headers)
+        response = await asyncio.to_thread(urllib.request.urlopen, req)
+
+        case_headers = CaseInsensitiveDict()
+        for key, value in response.headers.items():
+            case_headers[key] = value
+
+        return HTTPResponse(
+            url=response.url,
+            status_code=response.status,
+            http_version=response.version,
+            headers=case_headers,
+            body=response.read(),
+        )
+
+    async def get(
+        self,
+        url: str,
+        headers: dict[str, Any] = {},
+        query_params: dict[str, Any] = {},
+        body: bytes = b"",
+    ) -> HTTPResponse:
+        return await self.__make_request("GET", url, headers, query_params, body)
+
+    async def post(
+        self,
+        url: str,
+        headers: dict[str, Any] = {},
+        query_params: dict[str, Any] = {},
+        body: bytes = b"",
+    ) -> HTTPResponse:
+        return await self.__make_request("POST", url, headers, query_params, body)
+
+
+# HTTP Client END
 
 
 # HTTP Responses START
