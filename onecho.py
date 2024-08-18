@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import random
+import string
 import struct
 import traceback
 from typing import (
@@ -306,7 +308,7 @@ class JSONDatabase:
 # Shared state
 
 user_db = JSONDatabase(
-    ["username", "action_id"],
+    ["username"],
     "user_db.json",
 )
 
@@ -679,8 +681,268 @@ async def response_500(request: HTTPRequest) -> None:
 def safe_string(s: str) -> str:
     return s.lower().strip().replace(" ", "_")
 
+def create_random_string(n: int) -> str:
+    return "".join([random.choice(string.ascii_letters + string.digits) for _ in range(n)])
+
 
 # String Helpers END
+
+# Bancho custom country enums
+
+COUNTRY_DICT = {
+    "IO": 104,
+    "PS": 178,
+    "LV": 132,
+    "GI": 82,
+    "MZ": 154,
+    "BZ": 37,
+    "TR": 217,
+    "CV": 52,
+    "BI": 26,
+    "CM": 47,
+    "JM": 109,
+    "GU": 91,
+    "CY": 54,
+    "BW": 35,
+    "KW": 120,
+    "MY": 153,
+    "SH": 193,
+    "PG": 171,
+    "PW": 180,
+    "FM": 72,
+    "HR": 97,
+    "YT": 238,
+    "JO": 110,
+    "HK": 94,
+    "MW": 151,
+    "AZ": 18,
+    "IQ": 105,
+    "DO": 60,
+    "RS": 239,
+    "PK": 173,
+    "BR": 31,
+    "SN": 199,
+    "LI": 126,
+    "CD": 40,
+    "MG": 137,
+    "PE": 169,
+    "CK": 45,
+    "SJ": 195,
+    "SZ": 205,
+    "PM": 175,
+    "LY": 133,
+    "BV": 34,
+    "KN": 117,
+    "GR": 88,
+    "CC": 39,
+    "IN": 103,
+    "DZ": 61,
+    "SK": 196,
+    "VC": 229,
+    "GW": 92,
+    "BQ": 0,
+    "UM": 224,
+    "AF": 5,
+    "TZ": 221,
+    "AO": 11,
+    "AW": 17,
+    "AE": 0,
+    "PF": 170,
+    "MK": 139,
+    "AR": 13,
+    "AQ": 12,
+    "SL": 197,
+    "HT": 98,
+    "NF": 158,
+    "SS": 190,
+    "MU": 149,
+    "VA": 228,
+    "EC": 62,
+    "LC": 125,
+    "MX": 152,
+    "CW": 0,
+    "LT": 130,
+    "GN": 85,
+    "ZM": 241,
+    "LU": 131,
+    "NG": 159,
+    "MS": 147,
+    "MV": 150,
+    "DJ": 57,
+    "MQ": 145,
+    "IE": 101,
+    "CG": 40,
+    "LK": 127,
+    "NZ": 166,
+    "KR": 119,
+    "RO": 184,
+    "KE": 112,
+    "MF": 252,
+    "SR": 201,
+    "PA": 168,
+    "KI": 115,
+    "NL": 161,
+    "DM": 59,
+    "TC": 206,
+    "KZ": 122,
+    "CR": 50,
+    "NR": 164,
+    "UZ": 227,
+    "GE": 79,
+    "KP": 118,
+    "PN": 176,
+    "BY": 36,
+    "NI": 160,
+    "IR": 106,
+    "VI": 232,
+    "MA": 134,
+    "NO": 162,
+    "PT": 179,
+    "PY": 181,
+    "CU": 51,
+    "SC": 189,
+    "TT": 218,
+    "CA": 38,
+    "IT": 108,
+    "GF": 80,
+    "CN": 48,
+    "GQ": 87,
+    "LR": 128,
+    "BA": 19,
+    "TD": 207,
+    "AU": 16,
+    "MM": 141,
+    "HU": 99,
+    "EG": 64,
+    "JE": 250,
+    "IL": 102,
+    "BL": 251,
+    "BS": 32,
+    "SE": 191,
+    "MC": 135,
+    "SD": 190,
+    "ZA": 240,
+    "IM": 249,
+    "MO": 143,
+    "GL": 83,
+    "TV": 219,
+    "FK": 71,
+    "GB": 77,
+    "NA": 155,
+    "AM": 9,
+    "WS": 236,
+    "UY": 226,
+    "EE": 63,
+    "TL": 216,
+    "BT": 33,
+    "VU": 234,
+    "WF": 235,
+    "AX": 247,
+    "TK": 212,
+    "MN": 142,
+    "SB": 188,
+    "XK": 0,
+    "BH": 25,
+    "ID": 100,
+    "SV": 203,
+    "TG": 209,
+    "BF": 23,
+    "GG": 248,
+    "IS": 107,
+    "FJ": 70,
+    "KG": 113,
+    "BD": 21,
+    "ZW": 243,
+    "AI": 7,
+    "NP": 163,
+    "KH": 114,
+    "BJ": 27,
+    "EH": 65,
+    "BE": 22,
+    "SM": 198,
+    "CX": 53,
+    "TW": 220,
+    "KM": 116,
+    "AS": 14,
+    "AT": 15,
+    "LA": 123,
+    "US": 225,
+    "SY": 204,
+    "SO": 200,
+    "AD": 3,
+    "OM": 167,
+    "GT": 90,
+    "CF": 41,
+    "GY": 93,
+    "VN": 233,
+    "VE": 230,
+    "PH": 172,
+    "TM": 213,
+    "VG": 231,
+    "GP": 86,
+    "CZ": 55,
+    "GM": 84,
+    "MR": 146,
+    "TN": 214,
+    "SI": 194,
+    "TO": 215,
+    "UG": 223,
+    "SA": 187,
+    "ST": 202,
+    "QA": 182,
+    "FI": 69,
+    "CO": 49,
+    "AG": 6,
+    "PR": 177,
+    "PL": 174,
+    "GH": 81,
+    "GA": 76,
+    "TJ": 211,
+    "SX": 0,
+    "KY": 121,
+    "BO": 30,
+    "UA": 222,
+    "MP": 144,
+    "TF": 208,
+    "LB": 124,
+    "MT": 148,
+    "FR": 74,
+    "JP": 111,
+    "RU": 185,
+    "RW": 186,
+    "NC": 156,
+    "NE": 157,
+    "BN": 29,
+    "CI": 44,
+    "TH": 210,
+    "DE": 56,
+    "ET": 68,
+    "FO": 73,
+    "YE": 237,
+    "DK": 58,
+    "BG": 24,
+    "GS": 89,
+    "HM": 95,
+    "BB": 20,
+    "BM": 28,
+    "ML": 140,
+    "SG": 192,
+    "GD": 78,
+    "NU": 165,
+    "RE": 183,
+    "LS": 129,
+    "ER": 66,
+    "ME": 242,
+    "HN": 96,
+    "AL": 8,
+    "CH": 43,
+    "MD": 136,
+    "ES": 67,
+    "CL": 46,
+    "MH": 138,
+}
+
+# Bancho custom country enums END
 
 
 # Bancho Packets
@@ -966,11 +1228,90 @@ def bancho_login_reply_packet(user_id: int) -> bytes:
     return packet.finish()
 
 
+def bancho_protocol_packet() -> bytes:
+    packet = PacketBuilder(PacketID.SRV_PROTOCOL_VERSION)
+    packet.write_i32(19)
+    return packet.finish()
+
+
+def bancho_channel_info_end_packet() -> bytes:
+    packet = PacketBuilder(PacketID.SRV_CHANNEL_INFO_END)
+    packet.write_u32(0)
+    return packet.finish()
+
+
+def bancho_silence_end_packet(silence_end: int) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_SILENCE_END)
+    packet.write_u32(silence_end)
+    return packet.finish()
+
+
+def bancho_login_perms_packet(privileges: int) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_PRIVILEGES)
+    packet.write_u32(privileges)
+    return packet.finish()
+
+
+def bancho_user_presence_packet(
+    user_id: int,
+    username: str,
+    timezone_offset: int,
+    country_enum: int,
+    privileges: int,
+    longitude: float,
+    latitude: float,
+    rank: int,
+) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_USER_PRESENCE)
+    packet.write_i32(user_id)
+    packet.write_string(username)
+    packet.write_u8(timezone_offset + 24)
+    packet.write_u8(country_enum)
+    packet.write_u8(privileges)
+    packet.write_f32(longitude)
+    packet.write_f32(latitude)
+    packet.write_i32(rank)
+    return packet.finish()
+
+
+def bancho_user_stats_packet(
+    user_id: int,
+    action_id: int,
+    action_text: str,
+    action_md5: str,
+    action_mods: int,
+    mode: int,
+    action_map_id: int,
+    ranked_score: int,
+    accuracy: float,
+    playcount: int,
+    total_score: int,
+    rank: int,
+    pp: int,
+) -> bytes:
+    packet = PacketBuilder(PacketID.SRV_USER_STATS)
+    packet.write_i32(user_id)
+    packet.write_u8(action_id)
+    packet.write_string(action_text)
+    packet.write_string(action_md5)
+    packet.write_i32(action_mods)
+    packet.write_u8(mode)
+    packet.write_i32(action_map_id)
+    packet.write_i64(ranked_score)
+    packet.write_f32(accuracy / 100)
+    packet.write_i32(playcount)
+    packet.write_i64(total_score)
+    packet.write_i32(rank)
+    packet.write_i32(pp)
+    return packet.finish()
+
+
 # Bancho Packets END
 
 # Bancho HTTP Logic
 
 bancho_router = Router("c.akatsuki.gg")  # funny meme
+USERS = {}
 
 
 async def bancho_get(request: HTTPRequest) -> None:
@@ -1003,11 +1344,36 @@ async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
     osu_ver, timezone, _, client_hashes, allow_pms = additional_data.split("|")
     # osu_hash, _, adapter_md5, osu_uninst, serial_md5, _ = client_hashes.split(":")
 
+    # Ok so for now we are doing database-less login.
     packet_response = bytearray()
-    packet_response += bancho_login_reply_packet(-1)
+    user_id = len(USERS) + 1
+    packet_response += bancho_login_reply_packet(user_id)
+    packet_response += bancho_protocol_packet()
+    packet_response += bancho_channel_info_end_packet()
+    packet_response += bancho_silence_end_packet(0)
+    packet_response += bancho_login_perms_packet(5)  # player + supporter
+
+    # TODO: clean it LOL
+    user_rank = random.randint(1, 100)  # equal chances!
+    packet_response += bancho_user_presence_packet(
+        user_id,
+        username,
+        int(timezone),
+        COUNTRY_DICT["RO"],
+        5,  # player + supporter
+        39.01955903386848,
+        125.75276158057767,
+        user_rank,
+    )
+    packet_response += bancho_user_stats_packet(
+        user_id, 0, "", "", 0, 0, 0, 0, 100.0, 0, 0, user_rank, 69
+    )
     packet_response += bancho_notification_packet("onecho! - because it's that simple!")
 
-    return "no", packet_response
+    uuid = create_random_string(32)
+    USERS[uuid] = user_id
+
+    return uuid, packet_response
 
 
 @bancho_router.add_endpoint("/", methods=["GET", "POST"])
