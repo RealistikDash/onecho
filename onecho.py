@@ -1304,6 +1304,28 @@ async def handle_change_action(reader: BinaryReader, user: User) -> None:
     broadcast_to_all(bancho_user_stats_packet(user))
 
 
+@register_packet_handler(BanchoPacketID.OSU_REQUEST_STATUS_UPDATE)
+async def handle_request_status_update(_: BinaryReader, user: User) -> None:
+    user.enqueue(bancho_user_stats_packet(user))
+
+
+@register_packet_handler(BanchoPacketID.OSU_USER_STATS_REQUEST)
+async def handle_user_stats_request(reader: BinaryReader, user: User) -> None:
+    user_ids = reader.read_osu_list()
+
+    # TODO: restricted check
+    for user_id in filter(lambda x: x != user.user_id, user_ids):
+        osu_token = users_id_lookup_cache.get(user_id)
+        if osu_token is None:
+            continue
+
+        requested_user = users_cache.get(osu_token)
+        if requested_user is None:
+            continue
+
+        user.enqueue(bancho_user_presence_packet(requested_user))
+
+
 # Bancho Packets END
 
 
