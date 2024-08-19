@@ -17,12 +17,10 @@ Logger:
 - [x] Optional debug logging
 
 Database:
-- [x] Database object which supports adding dicts and lambda searching
-- [ ] Support removing rows.
-- [x] Database loading from JSON
-- [x] Database saving into JSON
-- [x] Database Indexes
-- [ ] Database Ordering
+- [x] Read and write CSV format.
+- [x] Support for multiple tables.
+- [x] Object serialisation.
+- [x] Automatic synchroniation
 
 HTTP:
 - [x] Async HTTP Server

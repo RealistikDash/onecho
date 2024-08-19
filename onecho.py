@@ -357,187 +357,130 @@ def debug(text: str):
 
 
 # Database START
-# TODO: Redo this database logic to use .csv
+def _parse_to_type[T](value: str, value_type: type[T]) -> T:
+    if value_type is str:
+        return value
 
+    if issubclass(value_type, (int, str, float, Enum)):
+        return value_type(value)
+    
+    if value_type is bool:
+        return value.lower() == "true"
 
-JsonTypes = Union[str, int, dict]
-JsonIndexes = Union[str, int]
-JsonLike = Union[dict[JsonIndexes, JsonTypes], list[JsonTypes]]
+    raise ValueError("Skill issue type??")
 
+def _parse_from_type[T](value: T) -> str:
+    if isinstance(value, Enum):
+        return value.value
 
-class JSONDatabase:
-    """A searchable collection of JSON objects."""
+    return str(value)
 
-    __slots__ = (  # speed go brrrrrrr
-        "_directory",
-        "_data",
-        "_index",
-        "_autoincr",
-        "_index_fields",
-    )
+class CSVResult[T](NamedTuple):
+    id: int
+    result: T
 
+class CSVModel:
+    def __init__(self, *args) -> None:
+        for (value, type), arg in zip(get_type_hints(self).items(), args):
+            setattr(self, value, _parse_to_type(arg, type))
+
+    def into_str_list(self) -> list[str]:
+        return [_parse_from_type(getattr(self, value)) for value in get_type_hints(self)]
+
+class CSVBasedDatabase[T: CSVModel]: # Based af.
     def __init__(
-        self,
-        indexed_fileds: list[JsonIndexes],
-        directory: str,
+            self,
+            *,
+            file_name: str,
+            model: T,
+            cache_table: bool = False,
     ) -> None:
-        self._directory = directory
-        # Autoincremented
-        self._data: dict[int, JsonLike] = {}
-        # How indexes work:
-        # Store a dict key entry of the indexed field
-        # Have that dict be indexed by possible values
-        # To those values is attached a list of all field IDs for that value.
-        ## ONLY WORKS FOR EXACT SEARCHES.
-        self._index: dict[JsonIndexes, dict[JsonTypes, list[int]]] = {}
-        self._index_fields: list[JsonIndexes] = indexed_fileds
+        self._parsing_model = model
+        self._file_name = file_name
+        self._table_cache: list[str] = []
+        self.__innit__()
 
-        self._autoincr = 1  # The next available ID.
+        if cache_table:
+            with open(self._file_name, "r") as f:
+                self._table_cache = f.readlines()
+                
 
-        self.try_load()
+    def __innit__(self) -> None:
+        if not os.path.exists(self._file_name):
+            with open(self._file_name, "w") as f:
+                f.write("")
 
-    def add_new_index(self, field_name: JsonIndexes) -> None:
-        """Populates _index with boilerplate data for index."""
+    def into_model(self, line: str) -> T:
+        return self._parsing_model(*line.strip().split(","))
 
-        self._index[field_name] = {}
+    def from_id(self, item_id: int) -> CSVResult[T] | None:
+        line_number = item_id + 1
+        if self._table_cache:
+            if len(self._table_cache) < line_number:
+                return None
+            return CSVResult(item_id, self.into_model(self._table_cache[line_number]))
+        
+        with open(self._file_name, "r") as f:
+            for i, line in enumerate(f):
+                if i == line_number:
+                    return CSVResult(item_id, self.into_model(line))
+                
+        return None
+    
+    def all(self) -> list[CSVResult[T]]:
+        if self._table_cache:
+            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(self._table_cache)]
+        
+        with open(self._file_name, "r") as f:
+            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(f)]
+        
+    def insert(self, item: T) -> None:
+        with open(self._file_name, "a") as f:
+            f.write(",".join(item.into_str_list()) + "\n")
 
-    def init_new_indexes(self) -> None:
-        """Adds boilerplate for a new index list. Assumes no data present."""
+        if self._table_cache:
+            self._table_cache.append(",".join(item.into_str_list()) + "\n")
 
-        assert (
-            not self._data
-        ), "New indexes may only be initialised if no data is present"
+    def update(self, item_id: int, item: T) -> None:
+        with open(self._file_name, "r") as f:
+            lines = f.readlines()
+        
+        lines[item_id] = ",".join(item.into_str_list()) + "\n"
 
-        for idx in self._index_fields:
-            self.add_new_index(idx)
+        with open(self._file_name, "w") as f:
+            f.writelines(lines)
 
-    def acquire_id(self) -> int:
-        """Gets the next autoincr id and incr."""
+        if self._table_cache:
+            self._table_cache = lines
 
-        aincr = self._autoincr
-        self._autoincr += 1
-        return aincr
+    def delete(self, item_id: int) -> None:
+        with open(self._file_name, "r") as f:
+            lines = f.readlines()
+        
+        del lines[item_id]
 
-    def try_load(self) -> bool:
-        """Tries to load the database."""
+        with open(self._file_name, "w") as f:
+            f.writelines(lines)
 
-        if not os.path.exists(self._directory):
-            info(
-                f"A database does not exist for {self._directory}. Starting from scratch."
-            )
-            self.init_new_indexes()
-            return False
+        if self._table_cache:
+            self._table_cache = lines
 
-        self.load()
-        info(f"Loaded database from {self._directory}!")
-        return True
-
-    def load(self) -> None:
-        """Loads data from self._directory."""
-
-        with open(self._directory, "r") as f:
-            read_db = json.load(f)
-
-        self._data = {int(index): value for index, value in read_db["data"].items()}
-        self._index = read_db["index"]
-        self._autoincr = read_db["autoincr"]
-        self._index_fields = read_db["index_fields"]
-
-    def into_dict(self) -> dict:
-        return {
-            "data": self._data,
-            "index": self._index,
-            "autoincr": self._autoincr,
-            "index_fields": self._index_fields,
-        }
-
-    def save(self) -> None:
-        """Saves the file to directory."""
-
-        with open(self._directory, "w") as f:
-            json.dump(
-                self.into_dict(),
-                f,
-            )
-
-        info(f"Saved database info {self._directory}")
-
-    def add_index_id(self, idx: JsonIndexes, value: JsonTypes, obj_id: int):
-        idx_val = self._index[idx]
-
-        value_idx = idx_val.get(value)
-        if value_idx is None:
-            idx_val[value] = value_idx = []
-
-        value_idx.append(obj_id)
-
-        debug(f"Indexed row id {obj_id}'s field {idx} for value {value}")
-
-    def insert(self, obj: JsonLike) -> int:
-        """Inserts an object into the db. Returns object id."""
-
-        # Acquire the id.
-        obj_id = self.acquire_id()
-
-        # Insert into db.
-        self._data[obj_id] = obj
-        debug(f"Inserted object into ID {obj_id}")
-
-        # Handle indexes.
-        for idx in self._index_fields:
-            if res := obj.get(idx):
-                self.add_index_id(
-                    idx,
-                    res,
-                    obj_id,
-                )
-
-        return obj_id
-
-    def query(self, lam: Callable[[JsonLike], bool]) -> list[JsonLike]:
-        """Iterates over entire db, returning results that match the lambda.
-        Does not use indexes.
-        """
-
-        return [obj for obj in self._data.values() if lam(obj)]
-
-    def fetch_eq(self, field: JsonIndexes, value: JsonTypes) -> list[JsonLike]:
-        """Fetches all results where `field` == `value`. Uses indexes when
-        possible. Else is a wrapper around `query`."""
-
-        if field in self._index_fields:
-            debug("Fetching using index.")
-            val_rows = self._index[field].get(value)
-
-            if not val_rows:
-                return []
-            return [self._data[row_id] for row_id in val_rows]
-        else:
-            debug("Fetching using query.")
-            return self.query(lambda x: x[field] == value)
-
-    def query_limit(
-        self, lam: Callable[[JsonLike], bool], limit: int
-    ) -> list[JsonLike]:
-        """Like `JSONDatabase.query` but allows you to specify a limit for
-        the amount of results."""
-
-        am = 0  # So we dont have to compute len(res)
-        res = []
-
-        for row in self._data.values():
-            if lam(row):
-                res.append(row)
-                am += 1
-
-            if am >= limit:
-                break
-
-        return res
+    def query(self, query: Callable[[T], bool]) -> list[CSVResult[T]]:
+        if self._table_cache:
+            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(self._table_cache) if query(self.into_model(line))]
+        
+        with open(self._file_name, "r") as f:
+            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(f) if query(self.into_model(line))]
 
 
 # Database END
 
+# Shared state
+
+user_db = CSVBasedDatabase(
+    file_name="users.csv",
+    model=User,
+)
 
 # HTTP Server START
 
@@ -1363,8 +1306,7 @@ class UserStatus:
     beatmap_id: int = 0
 
 
-@dataclass
-class User:
+class User(CSVModel):
     user_id: int
     username: str
     username_safe: str
