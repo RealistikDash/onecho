@@ -23,13 +23,13 @@ from collections.abc import Mapping
 from collections import OrderedDict
 
 from typing import Any
-from typing import Union
 from typing import Callable
 from typing import Awaitable
 from typing import NamedTuple
 from typing import get_type_hints
 
 from enum import Enum
+from enum import StrEnum
 from enum import IntEnum
 from enum import IntFlag
 from dataclasses import dataclass
@@ -183,6 +183,11 @@ class OsuMods(IntFlag):
 
     SPEED_MODS = DOUBLETIME | NIGHTCORE | HALFTIME
     GAME_CHANGING = RELAX | AUTOPILOT
+
+
+class OsuRelationship(StrEnum):
+    FRIEND = "FRIEND"
+    BLOCK = "BLOCK"
 
 
 class BanchoPrivileges(IntFlag):
@@ -407,11 +412,13 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         self,
         *,
         file_name: str,
-        model: T,
+        model: type[T],
+        increment_from: int = 0,
         cache_table: bool = False,
     ) -> None:
         self._parsing_model = model
         self._file_name = file_name
+        self._increment_from = increment_from
         self._table_cache: list[str] = []
         self.__innit__()
 
@@ -430,12 +437,15 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
     def from_id(self, item_id: int) -> CSVResult[T] | None:
         line_number = item_id + 1
         if self._table_cache:
-            if len(self._table_cache) < line_number:
+            if len(self._table_cache) + self._increment_from < line_number:
                 return None
-            return CSVResult(item_id, self.into_model(self._table_cache[line_number]))
+            return CSVResult(
+                item_id,
+                self.into_model(self._table_cache[line_number - self._increment_from]),
+            )
 
         with open(self._file_name, "r") as f:
-            for i, line in enumerate(f):
+            for i, line in enumerate(f, start=self._increment_from):
                 if i == line_number:
                     return CSVResult(item_id, self.into_model(line))
 
@@ -445,11 +455,14 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         if self._table_cache:
             return [
                 CSVResult(i, self.into_model(line))
-                for i, line in enumerate(self._table_cache)
+                for i, line in enumerate(self._table_cache, start=self._increment_from)
             ]
 
         with open(self._file_name, "r") as f:
-            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(f)]
+            return [
+                CSVResult(i, self.into_model(line))
+                for i, line in enumerate(f, start=self._increment_from)
+            ]
 
     def insert(self, item: T) -> None:
         with open(self._file_name, "a") as f:
@@ -462,7 +475,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         with open(self._file_name, "r") as f:
             lines = f.readlines()
 
-        lines[item_id] = ",".join(item.into_str_list()) + "\n"
+        lines[item_id - self._increment_from] = ",".join(item.into_str_list()) + "\n"
 
         with open(self._file_name, "w") as f:
             f.writelines(lines)
@@ -474,7 +487,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         with open(self._file_name, "r") as f:
             lines = f.readlines()
 
-        del lines[item_id]
+        del lines[item_id - self._increment_from]
 
         with open(self._file_name, "w") as f:
             f.writelines(lines)
@@ -486,26 +499,86 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         if self._table_cache:
             return [
                 CSVResult(i, self.into_model(line))
-                for i, line in enumerate(self._table_cache)
+                for i, line in enumerate(self._table_cache, start=self._increment_from)
                 if query(self.into_model(line))
             ]
 
         with open(self._file_name, "r") as f:
             return [
                 CSVResult(i, self.into_model(line))
-                for i, line in enumerate(f)
+                for i, line in enumerate(f, start=self._increment_from)
                 if query(self.into_model(line))
             ]
 
 
 # Database END
 
-# Shared state
 
-# user_db = CSVBasedDatabase(
-#     file_name="users.csv",
-#     model=User,
-# )
+# Database Models START
+
+
+class UserStatsModel(CSVModel):
+    user_id: int
+    mode: OsuMode
+    total_score: int = 0
+    ranked_score: int = 0
+    pp: int = 0
+    playcount: int = 0
+    playtime: int = 0
+    accuracy: float = 0.0
+    max_combo: int = 0
+    total_hits: int = 0
+    level: int = 1
+
+
+class UserModel(CSVModel):
+    username: str
+    username_safe: str
+    email: str
+    password_md5: str  # TODO: encryption
+    privileges: BanchoPrivileges = BanchoPrivileges.PLAYER
+    country: str = "xx"
+    silence_end: int = 0
+    creation_time: int = 0
+    latest_activity: int = 0
+
+
+class UserRelationshipModel(CSVModel):
+    user_id: int
+    friend_id: int
+    relation_type: OsuRelationship
+    since: int  # unix
+
+
+# Database Models END
+
+
+# Database Instances START
+
+
+user_db = CSVBasedDatabase[UserModel](
+    file_name="users.csv",
+    model=UserModel,
+    increment_from=3,  # 1 - bot (hardcoded), 2 - peppy (cannot message)
+)
+
+user_stats_db: dict[OsuMode, CSVBasedDatabase[UserStatsModel]] = {
+    mode: CSVBasedDatabase[UserStatsModel](
+        file_name=f"user_stats_{mode.name}.csv",
+        model=UserStatsModel,
+        increment_from=3,  # 1 - bot (hardcoded), 2 - peppy (cannot message)
+    )
+    for mode in OsuMode
+}
+
+user_relationship_db = CSVBasedDatabase[UserRelationshipModel](
+    file_name="user_relationships.csv",
+    model=UserRelationshipModel,
+)
+
+
+# Database Instances END
+
 
 # HTTP Server START
 
@@ -1331,7 +1404,8 @@ class UserStatus:
     beatmap_id: int = 0
 
 
-class User(CSVModel):
+@dataclass
+class User:
     user_id: int
     username: str
     username_safe: str
@@ -1350,11 +1424,9 @@ class User(CSVModel):
     latest_activity: int
 
     status: UserStatus = field(default_factory=UserStatus)
-    stats: dict[OsuMode, UserStatistics] = field(
-        default_factory=lambda: {mode: UserStatistics() for mode in OsuMode}
-    )
+    stats: dict[OsuMode, UserStatistics] = field(default_factory=dict)
 
-    friends: list[int] = field(default_factory=lambda: [1])  # Bot is always a friend.
+    friends: list[int] = field(default_factory=list)
 
     is_bot: bool = False
 
