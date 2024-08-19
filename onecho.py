@@ -956,7 +956,7 @@ async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
             country_acronym="IN",
             country_code=COUNTRY_CODES["in"],
             latitude=19.0760,
-            longitude=72.8777,
+            longitude=72.7777, # Fixed this.
         )
 
     return UserGeolocalisation(
@@ -1479,11 +1479,42 @@ bancho_router = Router(
     }
 )  # funny meme
 
+QUOTES = [
+    "Commit your RealistikPanel changes.",
+    "Den Bensch.",
+    "I'm a bot, I don't have feelings. - GitHub Copilot",
+    "Męski oszuśćik is gonna get you.",
+    "The sigma is crying.",
+    "Kill yourself",
+    "KYS - Kuopion yliopistollinen sairaala",
+    "'shoot yourself' - 'i mean shoot your shot",
+
+]
+GIFS = [
+    "https://tenor.com/view/finnish-hospital-kys-gif-27573537",
+    "https://cdn.discordapp.com/attachments/748687781605408911/1241086998471508179/caption-6.gif?ex=66c43016&is=66c2de96&hm=ad646c33412aedfc6c1ce847a40b9ca951118a6e497d0dded14f89c9a41edc96&",
+    "https://tenor.com/view/tusk-gif-27409780",
+    "https://tenor.com/view/computer-works-for-me-meme-engineering-dvd-gif-27508941",
+    "https://media.discordapp.net/attachments/860168510080024630/1170384558693290004/watermark.gif?ex=66c40dcf&is=66c2bc4f&hm=9288e17e4955871c7d7b77a1f77dcbfaa6ee3a6d72d0cdbcf4b867fad92fca24&",
+    "https://media.discordapp.net/attachments/1224840114442862703/1229035907219456090/caption.gif?ex=66c482e2&is=66c33162&hm=d182754a709d146e476e38b1aafff74e7d8fdc69bf4ff4596d85ed7b1d9fbbb4&",
+    "https://cdn.discordapp.com/attachments/784836328964489226/1198035021097869453/caption.gif?ex=66c4734f&is=66c321cf&hm=e56cd1f7f427c042d8d0580ecb48aece5cd4f69590932b67a46ef64bada95b33&",
+    "https://media.discordapp.net/attachments/860168510080024630/1117605803428433960/togif.gif?ex=66c486c3&is=66c33543&hm=713ce507aa7578a7889fd936b2df8886b987e67b62f14265cfd8e7c2d6e7dffd&",
+    "https://tenor.com/view/im-in-your-walls-gif-25753367",
+    "https://media.discordapp.net/attachments/529631920380968972/1184168699695988856/attachment.gif?ex=66c41a4a&is=66c2c8ca&hm=3e5071da1065eda1b0c8d480a97b3baaf754b6473b2de5af1932625b5743f000&",
+    "https://tenor.com/view/jestem-w-szoku-fumo-touhou-szok-shock-shocked-meme-gif-25666619",
+    "https://cdn.discordapp.com/attachments/789123994750025728/1236739139194589204/meski_oszuscik.gif?ex=66c430d4&is=66c2df54&hm=22fe6db029b001196b056961990a1a40950933d24fe797b102a8250fadb57311&",
+    "https://tenor.com/view/furina-sad-focalors-depressed-cry-gif-13624223194346406319",
+    "https://media.discordapp.net/attachments/1175144161662488688/1177186929662500954/attachment-2.gif?ex=66c46943&is=66c317c3&hm=4ece032c22bf660e8c723688299c92610a5dfaa5b390dda9461895145b3827af&",
+    "https://tenor.com/view/skillissue-skill-issue-gif-22125481",
+]
 
 async def bancho_get(request: HTTPRequest) -> None:
+    very_cool = random.choice(QUOTES)
+    piwko_of_today = random.choice(GIFS)
+    rapapara = f"onecho! - <h1>{very_cool}</h1> <br> <img src='{piwko_of_today}'>"
     await request.send_response(
         status_code=200,
-        body=b"onecho! - because it's that simple!",
+        body=rapapara.encode(),
     )
 
 
