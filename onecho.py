@@ -366,11 +366,12 @@ def _parse_to_type[T](value: str, value_type: type[T]) -> T:
 
     if issubclass(value_type, (int, str, float, Enum)):
         return value_type(value)
-    
+
     if value_type is bool:
         return value.lower() == "true"
 
     raise ValueError("Skill issue type??")
+
 
 def _parse_from_type[T](value: T) -> str:
     if isinstance(value, Enum):
@@ -378,9 +379,11 @@ def _parse_from_type[T](value: T) -> str:
 
     return str(value)
 
+
 class CSVResult[T](NamedTuple):
     id: int
     result: T
+
 
 class CSVModel:
     def __init__(self, *args, **kwargs) -> None:
@@ -394,15 +397,18 @@ class CSVModel:
             setattr(self, value, _parse_to_type(kwargs[value], type))
 
     def into_str_list(self) -> list[str]:
-        return [_parse_from_type(getattr(self, value)) for value in get_type_hints(self)]
+        return [
+            _parse_from_type(getattr(self, value)) for value in get_type_hints(self)
+        ]
 
-class CSVBasedDatabase[T: CSVModel]: # Based af.
+
+class CSVBasedDatabase[T: CSVModel]:  # Based af.
     def __init__(
-            self,
-            *,
-            file_name: str,
-            model: T,
-            cache_table: bool = False,
+        self,
+        *,
+        file_name: str,
+        model: T,
+        cache_table: bool = False,
     ) -> None:
         self._parsing_model = model
         self._file_name = file_name
@@ -412,7 +418,6 @@ class CSVBasedDatabase[T: CSVModel]: # Based af.
         if cache_table:
             with open(self._file_name, "r") as f:
                 self._table_cache = f.readlines()
-                
 
     def __innit__(self) -> None:
         if not os.path.exists(self._file_name):
@@ -428,21 +433,24 @@ class CSVBasedDatabase[T: CSVModel]: # Based af.
             if len(self._table_cache) < line_number:
                 return None
             return CSVResult(item_id, self.into_model(self._table_cache[line_number]))
-        
+
         with open(self._file_name, "r") as f:
             for i, line in enumerate(f):
                 if i == line_number:
                     return CSVResult(item_id, self.into_model(line))
-                
+
         return None
-    
+
     def all(self) -> list[CSVResult[T]]:
         if self._table_cache:
-            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(self._table_cache)]
-        
+            return [
+                CSVResult(i, self.into_model(line))
+                for i, line in enumerate(self._table_cache)
+            ]
+
         with open(self._file_name, "r") as f:
             return [CSVResult(i, self.into_model(line)) for i, line in enumerate(f)]
-        
+
     def insert(self, item: T) -> None:
         with open(self._file_name, "a") as f:
             f.write(",".join(item.into_str_list()) + "\n")
@@ -453,7 +461,7 @@ class CSVBasedDatabase[T: CSVModel]: # Based af.
     def update(self, item_id: int, item: T) -> None:
         with open(self._file_name, "r") as f:
             lines = f.readlines()
-        
+
         lines[item_id] = ",".join(item.into_str_list()) + "\n"
 
         with open(self._file_name, "w") as f:
@@ -465,7 +473,7 @@ class CSVBasedDatabase[T: CSVModel]: # Based af.
     def delete(self, item_id: int) -> None:
         with open(self._file_name, "r") as f:
             lines = f.readlines()
-        
+
         del lines[item_id]
 
         with open(self._file_name, "w") as f:
@@ -476,20 +484,28 @@ class CSVBasedDatabase[T: CSVModel]: # Based af.
 
     def query(self, query: Callable[[T], bool]) -> list[CSVResult[T]]:
         if self._table_cache:
-            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(self._table_cache) if query(self.into_model(line))]
-        
+            return [
+                CSVResult(i, self.into_model(line))
+                for i, line in enumerate(self._table_cache)
+                if query(self.into_model(line))
+            ]
+
         with open(self._file_name, "r") as f:
-            return [CSVResult(i, self.into_model(line)) for i, line in enumerate(f) if query(self.into_model(line))]
+            return [
+                CSVResult(i, self.into_model(line))
+                for i, line in enumerate(f)
+                if query(self.into_model(line))
+            ]
 
 
 # Database END
 
 # Shared state
 
-user_db = CSVBasedDatabase(
-    file_name="users.csv",
-    model=User,
-)
+# user_db = CSVBasedDatabase(
+#     file_name="users.csv",
+#     model=User,
+# )
 
 # HTTP Server START
 
@@ -956,7 +972,7 @@ async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
             country_acronym="IN",
             country_code=COUNTRY_CODES["in"],
             latitude=19.0760,
-            longitude=72.7777, # Fixed this.
+            longitude=72.7777,  # Fixed this.
         )
 
     return UserGeolocalisation(
@@ -1476,6 +1492,7 @@ bancho_router = Router(
         "ce.akatsuki.gg",
         "c4.akatsuki.gg",
         "c6.akatsuki.gg",
+        "127.0.0.1:2137",
     }
 )  # funny meme
 
@@ -1483,38 +1500,45 @@ QUOTES = [
     "Commit your RealistikPanel changes.",
     "Den Bensch.",
     "I'm a bot, I don't have feelings. - GitHub Copilot",
-    "Męski oszuśćik is gonna get you.",
+    "Męski oszuścik is gonna get you.",
     "The sigma is crying.",
     "Kill yourself",
     "KYS - Kuopion yliopistollinen sairaala",
     "'shoot yourself' - 'i mean shoot your shot",
-
 ]
 GIFS = [
-    "https://tenor.com/view/finnish-hospital-kys-gif-27573537",
+    "https://media1.tenor.com/m/omHmObRADasAAAAd/finnish-hospital-kys.gif",
     "https://cdn.discordapp.com/attachments/748687781605408911/1241086998471508179/caption-6.gif?ex=66c43016&is=66c2de96&hm=ad646c33412aedfc6c1ce847a40b9ca951118a6e497d0dded14f89c9a41edc96&",
-    "https://tenor.com/view/tusk-gif-27409780",
-    "https://tenor.com/view/computer-works-for-me-meme-engineering-dvd-gif-27508941",
+    "https://media1.tenor.com/m/fkVF3jbeRw0AAAAC/tusk.gif",
+    "https://media1.tenor.com/m/5U1iPUrdTc0AAAAC/computer-works-for-me.gif",
     "https://media.discordapp.net/attachments/860168510080024630/1170384558693290004/watermark.gif?ex=66c40dcf&is=66c2bc4f&hm=9288e17e4955871c7d7b77a1f77dcbfaa6ee3a6d72d0cdbcf4b867fad92fca24&",
     "https://media.discordapp.net/attachments/1224840114442862703/1229035907219456090/caption.gif?ex=66c482e2&is=66c33162&hm=d182754a709d146e476e38b1aafff74e7d8fdc69bf4ff4596d85ed7b1d9fbbb4&",
     "https://cdn.discordapp.com/attachments/784836328964489226/1198035021097869453/caption.gif?ex=66c4734f&is=66c321cf&hm=e56cd1f7f427c042d8d0580ecb48aece5cd4f69590932b67a46ef64bada95b33&",
     "https://media.discordapp.net/attachments/860168510080024630/1117605803428433960/togif.gif?ex=66c486c3&is=66c33543&hm=713ce507aa7578a7889fd936b2df8886b987e67b62f14265cfd8e7c2d6e7dffd&",
-    "https://tenor.com/view/im-in-your-walls-gif-25753367",
+    "https://media1.tenor.com/m/9B2tvz_W9OQAAAAd/im-in-your-walls.gif",
     "https://media.discordapp.net/attachments/529631920380968972/1184168699695988856/attachment.gif?ex=66c41a4a&is=66c2c8ca&hm=3e5071da1065eda1b0c8d480a97b3baaf754b6473b2de5af1932625b5743f000&",
-    "https://tenor.com/view/jestem-w-szoku-fumo-touhou-szok-shock-shocked-meme-gif-25666619",
+    "https://media1.tenor.com/m/uGN34orccIEAAAAC/skillissue-skill.gif",
     "https://cdn.discordapp.com/attachments/789123994750025728/1236739139194589204/meski_oszuscik.gif?ex=66c430d4&is=66c2df54&hm=22fe6db029b001196b056961990a1a40950933d24fe797b102a8250fadb57311&",
-    "https://tenor.com/view/furina-sad-focalors-depressed-cry-gif-13624223194346406319",
+    "https://media1.tenor.com/m/vRL2z5-nwa8AAAAd/furina-sad.gif",
     "https://media.discordapp.net/attachments/1175144161662488688/1177186929662500954/attachment-2.gif?ex=66c46943&is=66c317c3&hm=4ece032c22bf660e8c723688299c92610a5dfaa5b390dda9461895145b3827af&",
-    "https://tenor.com/view/skillissue-skill-issue-gif-22125481",
+    "https://media1.tenor.com/m/uGN34orccIEAAAAC/skillissue-skill.gif",
 ]
+
 
 async def bancho_get(request: HTTPRequest) -> None:
     very_cool = random.choice(QUOTES)
     piwko_of_today = random.choice(GIFS)
-    rapapara = f"onecho! - <h1>{very_cool}</h1> <br> <img src='{piwko_of_today}'>"
+    rapapara = f"""
+    <center style='font-family: "Comic Sans MS", "Comic Sans", cursive;'>
+        <h1>onecho!</h1> <h2>{very_cool}</h2> <br> <img src='{piwko_of_today}'>
+    </center>
+    """
     await request.send_response(
         status_code=200,
-        body=rapapara.encode(),
+        body=rapapara.encode("utf-8"),
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+        },
     )
 
 
