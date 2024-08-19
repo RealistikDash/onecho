@@ -573,7 +573,7 @@ user_db = CSVBasedDatabase[UserModel](
 
 user_stats_db: dict[OsuMode, CSVBasedDatabase[UserStatsModel]] = {
     mode: CSVBasedDatabase[UserStatsModel](
-        file_name=f"user_stats_{mode.name}.csv",
+        file_name=f"user_stats_{mode.name.lower()}.csv",
         model=UserStatsModel,
         increment_from=3,  # 1 - bot (hardcoded), 2 - peppy (cannot message)
     )
