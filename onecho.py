@@ -26,7 +26,10 @@ from typing import Any
 from typing import Union
 from typing import Callable
 from typing import Awaitable
+from typing import NamedTuple
+from typing import get_type_hints
 
+from enum import Enum
 from enum import IntEnum
 from enum import IntFlag
 from dataclasses import dataclass
@@ -380,9 +383,15 @@ class CSVResult[T](NamedTuple):
     result: T
 
 class CSVModel:
-    def __init__(self, *args) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         for (value, type), arg in zip(get_type_hints(self).items(), args):
             setattr(self, value, _parse_to_type(arg, type))
+
+        for value, type in get_type_hints(self).items():
+            if value not in kwargs:
+                continue
+
+            setattr(self, value, _parse_to_type(kwargs[value], type))
 
     def into_str_list(self) -> list[str]:
         return [_parse_from_type(getattr(self, value)) for value in get_type_hints(self)]
