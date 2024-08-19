@@ -305,6 +305,15 @@ class BanchoPacketID(IntEnum):
     OSU_TOURNAMENT_LEAVE_MATCH_CHANNEL = 109
 
 
+GLOBALS_GLOBALS = {
+    "OsuMode": OsuMode,
+    "OsuMods": OsuMods,
+    "OsuRelationship": OsuRelationship,
+    "BanchoPrivileges": BanchoPrivileges,
+    "BanchoAction": BanchoAction,
+    "BanchoPacketID": BanchoPacketID,
+}
+
 # Global Constants END
 
 
@@ -379,8 +388,14 @@ def _parse_to_type[T](value: str, value_type: type[T]) -> T:
 
 
 def _parse_from_type[T](value: T) -> str:
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+
     if isinstance(value, Enum):
-        return value.value
+        return _parse_from_type(value.value)
 
     return str(value)
 
@@ -392,10 +407,12 @@ class CSVResult[T](NamedTuple):
 
 class CSVModel:
     def __init__(self, *args, **kwargs) -> None:
-        for (value, type), arg in zip(get_type_hints(self).items(), args):
+        for (value, type), arg in zip(
+            get_type_hints(self, globalns=GLOBALS_GLOBALS).items(), args
+        ):
             setattr(self, value, _parse_to_type(arg, type))
 
-        for value, type in get_type_hints(self).items():
+        for value, type in get_type_hints(self, globalns=GLOBALS_GLOBALS).items():
             if value not in kwargs:
                 continue
 
@@ -403,7 +420,8 @@ class CSVModel:
 
     def into_str_list(self) -> list[str]:
         return [
-            _parse_from_type(getattr(self, value)) for value in get_type_hints(self)
+            _parse_from_type(getattr(self, value))
+            for value in get_type_hints(self, globalns=GLOBALS_GLOBALS)
         ]
 
 
@@ -414,15 +432,16 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         file_name: str,
         model: type[T],
         increment_from: int = 0,
-        cache_table: bool = False,
+        cache_table: bool = True,
     ) -> None:
         self._parsing_model = model
         self._file_name = file_name
         self._increment_from = increment_from
+        self._cache_table = cache_table
         self._table_cache: list[str] = []
         self.__innit__()
 
-        if cache_table:
+        if self._cache_table:
             with open(self._file_name, "r") as f:
                 self._table_cache = f.readlines()
 
@@ -435,12 +454,11 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         return self._parsing_model(*line.strip().split(","))
 
     def from_id(self, item_id: int) -> CSVResult[T] | None:
-        line_number = item_id + 1
         if self._table_cache:
-            if len(self._table_cache) + self._increment_from < line_number:
+            if len(self._table_cache) + self._increment_from < item_id:
                 return None
 
-            record = self._table_cache[line_number - self._increment_from]
+            record = self._table_cache[item_id - self._increment_from]
             if record.startswith("#"):
                 return None
 
@@ -451,7 +469,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
 
         with open(self._file_name, "r") as f:
             for i, line in enumerate(f, start=self._increment_from):
-                if i == line_number:
+                if i == item_id - self._increment_from:
                     return CSVResult(item_id, self.into_model(line))
 
         return None
@@ -461,22 +479,27 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(self._table_cache, start=self._increment_from)
-                if not line.startswith("#")
+                if line.strip() and not line.startswith("#")
             ]
 
         with open(self._file_name, "r") as f:
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(f, start=self._increment_from)
-                if not line.startswith("#")
+                if line.strip() and not line.startswith("#")
             ]
 
-    def insert(self, item: T) -> None:
+    def insert(self, item: T) -> int:
+        if self._cache_table:
+            self._table_cache.append(",".join(item.into_str_list()) + "\n")
+
         with open(self._file_name, "a") as f:
             f.write(",".join(item.into_str_list()) + "\n")
 
-        if self._table_cache:
-            self._table_cache.append(",".join(item.into_str_list()) + "\n")
+        with open(self._file_name, "r") as f:
+            line_count = len(f.readlines())
+
+        return self._increment_from + line_count - 1
 
     def update(self, item_id: int, item: T) -> None:
         with open(self._file_name, "r") as f:
@@ -487,7 +510,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         with open(self._file_name, "w") as f:
             f.writelines(lines)
 
-        if self._table_cache:
+        if self._cache_table:
             self._table_cache = lines
 
     def delete(self, item_id: int) -> None:
@@ -501,7 +524,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         with open(self._file_name, "w") as f:
             f.writelines(lines)
 
-        if self._table_cache:
+        if self._cache_table:
             self._table_cache = lines
 
     def query(self, query: Callable[[T], bool]) -> list[CSVResult[T]]:
@@ -509,15 +532,27 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(self._table_cache, start=self._increment_from)
-                if query(self.into_model(line)) and not line.startswith("#")
+                if line.strip()
+                and query(self.into_model(line))
+                and not line.startswith("#")
             ]
 
         with open(self._file_name, "r") as f:
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(f, start=self._increment_from)
-                if query(self.into_model(line)) and not line.startswith("#")
+                if line.strip()
+                and query(self.into_model(line))
+                and not line.startswith("#")
             ]
+
+    def query_one(self, query: Callable[[T], bool]) -> CSVResult[T] | None:
+        record = self.query(query)
+
+        if not record:
+            return None
+
+        return record[0]
 
 
 # Database END
@@ -528,7 +563,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
 
 class UserStatsModel(CSVModel):
     user_id: int
-    mode: OsuMode
+    mode: int
     total_score: int = 0
     ranked_score: int = 0
     pp: int = 0
@@ -545,7 +580,7 @@ class UserModel(CSVModel):
     username_safe: str
     email: str
     password_md5: str  # TODO: encryption
-    privileges: BanchoPrivileges = BanchoPrivileges.PLAYER
+    privileges: int
     country: str = "xx"
     silence_end: int = 0
     creation_time: int = 0
@@ -587,6 +622,41 @@ user_relationship_db = CSVBasedDatabase[UserRelationshipModel](
 
 
 # Database Instances END
+
+
+# Database Functions START
+
+
+def insert_user_and_stats(
+    username: str,
+    email: str,
+    password_md5: str,
+    geoloc: UserGeolocalisation,
+) -> tuple[int, UserModel]:
+    user_model = UserModel(
+        username=username,
+        username_safe=safe_string(username),
+        email=email,
+        password_md5=password_md5,
+        country=geoloc.country_acronym,
+        privileges=(BanchoPrivileges.PLAYER | BanchoPrivileges.SUPPORTER).value,
+        creation_time=int(time.time()),
+        latest_activity=int(time.time()),
+    )
+
+    user_id = user_db.insert(user_model)
+    for mode in OsuMode:
+        user_stats_db[mode].insert(
+            UserStatsModel(
+                user_id=user_id,
+                mode=mode.value,
+            )
+        )
+
+    return user_id, user_model
+
+
+# Database Functions END
 
 
 # HTTP Server START
@@ -1056,7 +1126,7 @@ async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
             latitude=19.0760,
             longitude=72.7777,  # Fixed this.
         )
-    
+
     country_acronym = json_data["countryCode"].lower()
     return UserGeolocalisation(
         country_acronym=country_acronym,
@@ -1351,8 +1421,8 @@ async def handle_change_action(reader: BinaryReader, user: User) -> None:
     user.status.mode = OsuMode(reader.read_u8())
     user.status.beatmap_id = reader.read_i32()
 
-    # TODO: restricted check
-    broadcast_to_all(bancho_user_stats_packet(user))
+    if not user.restricted:
+        broadcast_to_all(bancho_user_stats_packet(user))
 
 
 @register_packet_handler(BanchoPacketID.OSU_REQUEST_STATUS_UPDATE)
@@ -1364,7 +1434,6 @@ async def handle_request_status_update(_: BinaryReader, user: User) -> None:
 async def handle_user_stats_request(reader: BinaryReader, user: User) -> None:
     user_ids = reader.read_osu_list()
 
-    # TODO: restricted check
     for user_id in filter(lambda x: x != user.user_id, user_ids):
         osu_token = users_id_lookup_cache.get(user_id)
         if osu_token is None:
@@ -1372,6 +1441,9 @@ async def handle_user_stats_request(reader: BinaryReader, user: User) -> None:
 
         requested_user = users_cache.get(osu_token)
         if requested_user is None:
+            continue
+
+        if requested_user.restricted:
             continue
 
         user.enqueue(bancho_user_presence_packet(requested_user))
@@ -1393,15 +1465,39 @@ class UserGeolocalisation:
 
 @dataclass
 class UserStatistics:
-    total_score: int = 0
-    ranked_score: int = 0
-    pp: int = 0
-    accuracy: float = 0.0
-    playcount: int = 0
-    playtime: int = 0
-    max_combo: int = 0
-    total_hits: int = 0
-    rank: int = 0
+    total_score: int
+    ranked_score: int
+    pp: int
+    playcount: int
+    playtime: int
+    accuracy: float
+    max_combo: int
+    total_hits: int
+    level: int
+    rank: int
+
+    @staticmethod
+    def from_database(_id: int, mode: OsuMode) -> UserStatistics | None:
+        database = user_stats_db.get(mode)
+        if database is None:
+            return None
+
+        record = database.from_id(_id)
+        if record is None:
+            return None
+
+        return UserStatistics(
+            total_score=record.result.total_score,
+            ranked_score=record.result.ranked_score,
+            pp=record.result.pp,
+            playcount=record.result.playcount,
+            playtime=record.result.playtime,
+            accuracy=record.result.accuracy,
+            max_combo=record.result.max_combo,
+            total_hits=record.result.total_hits,
+            level=record.result.level,
+            rank=-1,
+        )
 
 
 @dataclass
@@ -1443,8 +1539,31 @@ class User:
     _packet_queue = bytearray()
 
     @property
+    def restricted(self) -> bool:
+        return self.privileges & BanchoPrivileges.PLAYER == 0
+
+    @property
     def current_stats(self) -> UserStatistics:
         return self.stats[self.status.mode]
+
+    def fetch_stats_from_database(self) -> None:
+        for mode in OsuMode:
+            stats = UserStatistics.from_database(self.user_id, mode)
+            assert stats is not None
+            self.stats[mode] = stats
+
+    def fetch_current_ranks(self) -> None:
+        for mode in OsuMode:
+            self.stats[mode].rank = get_user_rank(self.user_id, mode)
+
+    def fetch_friends_from_database(self) -> None:
+        friends = user_relationship_db.query(
+            lambda x: x.user_id == self.user_id
+            and x.relation_type == OsuRelationship.FRIEND
+        )
+
+        # Bot is friends with everyone.
+        self.friends = [1] + [record.result.friend_id for record in friends]
 
     def presence_and_stats(self) -> bytes:
         return bancho_user_presence_packet(self) + bancho_user_stats_packet(self)
@@ -1456,32 +1575,6 @@ class User:
         data = self._packet_queue.copy()
         self._packet_queue.clear()
         return data
-
-
-# TODO: Database functionality
-def initialise_new_user(
-    username: str,
-    osu_version: str,
-    utc_offset: int,
-    geoloc: UserGeolocalisation,
-    pm_private: bool,
-) -> User:
-    return User(
-        user_id=len(users_cache) + 2,
-        username=username,
-        username_safe=safe_string(username),
-        osu_token=create_random_string(32),
-        osu_version=osu_version,
-        utc_offset=utc_offset,
-        pm_private=pm_private,
-        privileges=BanchoPrivileges.PLAYER
-        | BanchoPrivileges.DEVELOPER
-        | BanchoPrivileges.SUPPORTER,
-        geoloc=geoloc,
-        silence_end=0,
-        login_time=int(time.time()),
-        latest_activity=int(time.time()),
-    )
 
 
 # Bancho Models END
@@ -1538,6 +1631,7 @@ class BanchoBot(User):
             max_combo=0,
             total_hits=0,
             rank=0,
+            level=1,
         )
 
 
@@ -1549,6 +1643,51 @@ class BanchoBot(User):
 
 users_id_lookup_cache: dict[int, str] = {}  # user_id: uuid
 users_cache: dict[str, User] = {}  # uuid: User
+
+# Son: Mum can we have redis?
+# Mum: We have redis at home.
+# Redis at home START:
+
+
+users_leaderboards: dict[OsuMode, list[tuple[int, int]]] = {
+    mode: [] for mode in OsuMode
+}  # mode: [tuple(user_id, pp)]
+
+
+def add_user_to_leaderboards(user: User) -> None:
+    for mode in OsuMode:
+        users_leaderboards[mode].append((user.user_id, user.stats[mode].pp))
+    sort_leaderboards()
+
+
+def sort_leaderboards() -> None:
+    for mode in OsuMode:
+        leaderboard = users_leaderboards[mode]
+        leaderboard.sort(key=lambda x: x[1], reverse=True)
+        users_leaderboards[mode] = leaderboard
+
+
+def initialise_users_leaderboards() -> None:
+    for mode in OsuMode:
+        database = user_stats_db[mode]
+        stats = database.all()
+
+        for record in stats:
+            users_leaderboards[mode].append((record.result.user_id, record.result.pp))
+
+    sort_leaderboards()
+
+
+def get_user_rank(user_id: int, mode: OsuMode) -> int:
+    leaderboard = users_leaderboards[mode]
+    for rank, (_id, _) in enumerate(leaderboard, start=1):
+        if user_id == _id:
+            return rank
+
+    return 0
+
+
+# Redis at home END
 
 
 def broadcast_to_all(data: bytes) -> None:
@@ -1574,7 +1713,6 @@ bancho_router = Router(
         "ce.akatsuki.gg",
         "c4.akatsuki.gg",
         "c6.akatsuki.gg",
-        "127.0.0.1:2137",
     }
 )  # funny meme
 
@@ -1587,6 +1725,7 @@ QUOTES = [
     "Kill yourself",
     "KYS - Kuopion yliopistollinen sairaala",
     "'shoot yourself' - 'i mean shoot your shot",
+    "ZE CO DO CHUJA?",
 ]
 GIFS = [
     "https://media1.tenor.com/m/omHmObRADasAAAAd/finnish-hospital-kys.gif",
@@ -1675,17 +1814,42 @@ async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
         request.headers.get("x-forwarded-for")
     )
 
-    # Ok so for now we are doing database-less login.
-    # TODO: Implement database login
     packet_response = bytearray()
 
-    user = initialise_new_user(
-        username,
-        osu_ver,
-        int(utc_offset),
-        geolocalisation,
-        pm_private == "1",
+    user_result = user_db.query_one(lambda x: x.username_safe == safe_string(username))
+    if user_result is None:
+        user_id, user_model = insert_user_and_stats(
+            username=username,
+            email=f"changeme_{create_random_string(10)}@lol.xd",
+            password_md5=password_hash,
+            geoloc=geolocalisation,
+        )
+        freshly_registered = True
+    else:
+        user_id = user_result.id
+        user_model = user_result.result
+        freshly_registered = False
+
+    user = User(
+        user_id=user_id,
+        username=user_model.username,
+        username_safe=user_model.username_safe,
+        osu_token=create_random_string(32),
+        osu_version=osu_ver,
+        utc_offset=int(utc_offset),
+        pm_private=bool(int(pm_private)),
+        privileges=BanchoPrivileges(user_model.privileges),
+        geoloc=geolocalisation,
+        silence_end=user_model.silence_end,
+        login_time=int(time.time()),
+        latest_activity=int(time.time()),
     )
+    user.fetch_stats_from_database()
+    user.fetch_friends_from_database()
+
+    if freshly_registered:
+        add_user_to_leaderboards(user)
+    user.fetch_current_ranks()
 
     packet_response += bancho_login_reply_packet(user.user_id)
     packet_response += bancho_protocol_packet()
@@ -1699,7 +1863,8 @@ async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
     packet_response += user.presence_and_stats()
     packet_response += bancho_user_friends_packet(user.friends)
 
-    packet_response += bancho_notification_packet("onecho! - because it's that simple!")
+    piwko_of_today = random.choice(QUOTES)
+    packet_response += bancho_notification_packet(f"onecho! - {piwko_of_today}")
 
     await add_user_globally(user)
     return user.osu_token, packet_response
@@ -1724,6 +1889,8 @@ async def main() -> int:
     # Initialise bot
     bancho_bot = BanchoBot()
     await add_user_globally(bancho_bot)
+
+    initialise_users_leaderboards()
 
     # Initialise server
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
