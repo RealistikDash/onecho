@@ -849,6 +849,12 @@ class Endpoint:
         if isinstance(self.path, set):
             return path in self.path
 
+        ending_route = self.path.split("/")[-1]
+        if ending_route and ending_route[0] == "{" and ending_route[-1] == "}":
+            # let the handler handle the rest
+            endpoint_route_without_param = "/".join(self.path.split("/")[:-1])
+            return path.startswith(endpoint_route_without_param)
+
         return self.path == path
 
 
@@ -1881,6 +1887,40 @@ async def bancho_root_handler(request: HTTPRequest) -> None:
 
 # Bancho HTTP Logic END
 
+# Avatar Domain START
+
+avatar_router = Router("a.akatsuki.gg")
+
+with open("avatars/default.png", "rb") as f:
+    DEFAULT_AVATAR_BYTES = f.read()
+
+@avatar_router.add_endpoint("/{}", methods=["GET"])
+async def avatar_handler(request: HTTPRequest) -> None:
+    user_id = request.path.split("/")[-1]
+    if not user_id.isdigit():
+        await request.send_response(
+            status_code=200,
+            body=DEFAULT_AVATAR_BYTES,
+            headers={
+                "Content-Type": "image/png",
+            },
+        )
+        return
+
+    if os.path.exists(f"avatars/{user_id}.png"):
+        with open(f"avatars/{user_id}.png", "rb") as f:
+            avatar_data = f.read()
+    else:
+        avatar_data = DEFAULT_AVATAR_BYTES
+
+    await request.send_response(
+        status_code=200,
+        body=avatar_data,
+        headers={
+            "Content-Type": "image/png",
+        },
+    )
+
 
 # Server Entry Point START
 
@@ -1895,6 +1935,7 @@ async def main() -> int:
     # Initialise server
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
     server.add_router(bancho_router)
+    server.add_router(avatar_router)
 
     @server.on_start_server
     async def on_start_server() -> None:
