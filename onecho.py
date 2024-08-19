@@ -1051,15 +1051,16 @@ async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
 
     if json_data["status"] == "fail":
         return UserGeolocalisation(  # Mumbai, India.
-            country_acronym="IN",
+            country_acronym="in",
             country_code=COUNTRY_CODES["in"],
             latitude=19.0760,
             longitude=72.7777,  # Fixed this.
         )
-
+    
+    country_acronym = json_data["countryCode"].lower()
     return UserGeolocalisation(
-        country_acronym=json_data["countryCode"],
-        country_code=COUNTRY_CODES[json_data["countryCode"].lower()],
+        country_acronym=country_acronym,
+        country_code=COUNTRY_CODES[country_acronym],
         latitude=json_data["lat"],
         longitude=json_data["lon"],
     )
