@@ -439,9 +439,14 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         if self._table_cache:
             if len(self._table_cache) + self._increment_from < line_number:
                 return None
+
+            record = self._table_cache[line_number - self._increment_from]
+            if record.startswith("#"):
+                return None
+
             return CSVResult(
                 item_id,
-                self.into_model(self._table_cache[line_number - self._increment_from]),
+                self.into_model(record),
             )
 
         with open(self._file_name, "r") as f:
@@ -456,12 +461,14 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(self._table_cache, start=self._increment_from)
+                if not line.startswith("#")
             ]
 
         with open(self._file_name, "r") as f:
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(f, start=self._increment_from)
+                if not line.startswith("#")
             ]
 
     def insert(self, item: T) -> None:
@@ -487,7 +494,9 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         with open(self._file_name, "r") as f:
             lines = f.readlines()
 
-        del lines[item_id - self._increment_from]
+        lines[item_id - self._increment_from] = (
+            "#" + lines[item_id - self._increment_from]
+        )
 
         with open(self._file_name, "w") as f:
             f.writelines(lines)
@@ -500,14 +509,14 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(self._table_cache, start=self._increment_from)
-                if query(self.into_model(line))
+                if query(self.into_model(line)) and not line.startswith("#")
             ]
 
         with open(self._file_name, "r") as f:
             return [
                 CSVResult(i, self.into_model(line))
                 for i, line in enumerate(f, start=self._increment_from)
-                if query(self.into_model(line))
+                if query(self.into_model(line)) and not line.startswith("#")
             ]
 
 
