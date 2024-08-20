@@ -2133,7 +2133,7 @@ async def bancho_post(request: HTTPRequest) -> None:
     for packet in packets:
         await packets_router.route(packet, user)
 
-    user.latest_activity = int(time.time())
+    user.update_user()
     response = user.dequeue()
 
     await request.send_response(
