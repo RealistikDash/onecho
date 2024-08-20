@@ -40,7 +40,7 @@ Bancho:
 - [x] User Actions
 - [ ] Server Bot
 - [ ] Lobby
-- [ ] User Relationships
+- [x] User Relationships
 - [ ] Private Chat
 - [ ] Public Chat
 - [ ] Spectator

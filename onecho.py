@@ -718,6 +718,38 @@ def create_channel_in_database(
     channel_db.insert(channel_model)
 
 
+def create_user_relationship_in_database(
+    user_id: int,
+    friend_id: int,
+    relation_type: OsuRelationship,
+) -> None:
+    relationship_model = UserRelationshipModel(
+        user_id=user_id,
+        friend_id=friend_id,
+        relation_type=relation_type,
+        since=int(time.time()),
+    )
+
+    user_relationship_db.insert(relationship_model)
+
+
+def delete_user_relationship_in_database(
+    user_id: int,
+    friend_id: int,
+    relation_type: OsuRelationship,
+) -> None:
+    relationship_model = user_relationship_db.query_one(
+        lambda x: x.user_id == user_id
+        and x.friend_id == friend_id
+        and x.relation_type == relation_type
+    )
+
+    if not relationship_model:
+        return
+
+    user_relationship_db.delete(relationship_model.id)
+
+
 # Database Functions END
 
 
@@ -1682,6 +1714,66 @@ async def bancho_logout_handler(reader: PacketReader, user: User) -> None:
     user.update_user()
 
 
+@packets_router.add_handler(BanchoPacketID.OSU_RECEIVE_UPDATES, restricted=True)
+async def bancho_receive_updates_handler(reader: PacketReader, user: User) -> None:
+    pass  # client does that automatically
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_TOGGLE_BLOCK_NON_FRIEND_DMS)
+async def bancho_toggle_block_non_friend_dms_handler(
+    reader: PacketReader, user: User
+) -> None:
+    value = reader.read_i32()
+    user.pm_private = value == 1
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_FRIEND_ADD)
+async def bancho_friend_add_handler(reader: PacketReader, user: User) -> None:
+    user_id = reader.read_i32()
+
+    token = user_id_to_token.get(user_id)
+    if token is None:
+        return
+
+    requested_user = users.get(token)
+    if requested_user is None:
+        return
+
+    if requested_user.user_id == 1:  # bot is immune
+        return
+
+    if user_id in user.blocks:
+        user.remove_block(user_id)
+
+    if user_id in user.friends:
+        return
+
+    user.update_user()
+    user.add_friend(user_id)
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_FRIEND_REMOVE)
+async def bancho_friend_remove_handler(reader: PacketReader, user: User) -> None:
+    user_id = reader.read_i32()
+
+    token = user_id_to_token.get(user_id)
+    if token is None:
+        return
+
+    requested_user = users.get(token)
+    if requested_user is None:
+        return
+
+    if requested_user.user_id == 1:  # bot is immune
+        return
+
+    if not user_id in user.friends:
+        return
+
+    user.update_user()
+    user.remove_friend(user_id)
+
+
 # Bancho Packets END
 
 
@@ -1901,6 +1993,34 @@ class User:
         data = self._packet_queue.copy()
         self._packet_queue.clear()
         return data
+
+    def add_friend(self, friend_id: int) -> None:
+        create_user_relationship_in_database(
+            self.user_id, friend_id, OsuRelationship.FRIEND
+        )
+
+        self.friends.append(friend_id)
+
+    def add_block(self, block_id: int) -> None:
+        create_user_relationship_in_database(
+            self.user_id, block_id, OsuRelationship.BLOCK
+        )
+
+        self.blocks.append(block_id)
+
+    def remove_friend(self, friend_id: int) -> None:
+        delete_user_relationship_in_database(
+            self.user_id, friend_id, OsuRelationship.FRIEND
+        )
+
+        self.friends.remove(friend_id)
+
+    def remove_block(self, block_id: int) -> None:
+        delete_user_relationship_in_database(
+            self.user_id, block_id, OsuRelationship.FRIEND
+        )
+
+        self.blocks.append(block_id)
 
     def join_channel(self, channel: BanchoChannel) -> bool:
         if (
