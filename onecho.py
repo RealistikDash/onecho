@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from collections import OrderedDict
 
 from typing import Any
+from typing import TypedDict
 from typing import Callable
 from typing import Awaitable
 from typing import NamedTuple
@@ -39,6 +40,8 @@ from dataclasses import field
 
 
 DEBUG = "debug" in sys.argv
+MAIN_DOMAIN = "akatsuki.gg"
+
 STATUS_CODE = {
     100: "Continue",
     101: "Switching Protocols",
@@ -120,7 +123,11 @@ COUNTRY_CODES = {
 }
 # fmt: on
 
-HEADER_LEN = 7
+
+# Global Constants END
+
+
+# Enums START
 
 
 class BanchoAction(IntEnum):
@@ -305,21 +312,6 @@ class BanchoPacketID(IntEnum):
     OSU_TOURNAMENT_LEAVE_MATCH_CHANNEL = 109
 
 
-GLOBALS_GLOBALS = {
-    "OsuMode": OsuMode,
-    "OsuMods": OsuMods,
-    "OsuRelationship": OsuRelationship,
-    "BanchoPrivileges": BanchoPrivileges,
-    "BanchoAction": BanchoAction,
-    "BanchoPacketID": BanchoPacketID,
-}
-
-# Global Constants END
-
-
-# Logger START
-
-
 class Ansi(IntEnum):
     BLACK = 30
     RED = 31
@@ -343,6 +335,12 @@ class Ansi(IntEnum):
 
     def __str__(self) -> str:
         return f"\x1b[{self.value}m"
+
+
+# Enums END
+
+
+# Logger START
 
 
 def _log(content: str, action: str, colour: Ansi = Ansi.WHITE):
@@ -374,20 +372,22 @@ def debug(text: str):
 
 
 # Database START
+
+
 def _parse_to_type[T](value: str, value_type: type[T]) -> T:
     if value_type is str:
-        return value
+        return value_type(value)
 
     if issubclass(value_type, (int, str, float, Enum)):
         return value_type(value)
 
     if value_type is bool:
-        return value.lower() == "true"
+        return value_type(value.lower() == "true")
 
     raise ValueError("Skill issue type??")
 
 
-def _parse_from_type[T](value: T) -> str:
+def _parse_from_type(value: Any) -> str:
     if isinstance(value, str):
         return value
 
@@ -407,12 +407,10 @@ class CSVResult[T](NamedTuple):
 
 class CSVModel:
     def __init__(self, *args, **kwargs) -> None:
-        for (value, type), arg in zip(
-            get_type_hints(self, globalns=GLOBALS_GLOBALS).items(), args
-        ):
+        for (value, type), arg in zip(get_type_hints(self).items(), args):
             setattr(self, value, _parse_to_type(arg, type))
 
-        for value, type in get_type_hints(self, globalns=GLOBALS_GLOBALS).items():
+        for value, type in get_type_hints(self).items():
             if value not in kwargs:
                 continue
 
@@ -420,8 +418,7 @@ class CSVModel:
 
     def into_str_list(self) -> list[str]:
         return [
-            _parse_from_type(getattr(self, value))
-            for value in get_type_hints(self, globalns=GLOBALS_GLOBALS)
+            _parse_from_type(getattr(self, value)) for value in get_type_hints(self)
         ]
 
 
@@ -444,6 +441,13 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         if self._cache_table:
             with open(self._file_name, "r") as f:
                 self._table_cache = f.readlines()
+
+    def __len__(self) -> int:
+        if self._table_cache:
+            return len(self._table_cache)
+
+        with open(self._file_name, "r") as f:
+            return len(f.readlines())
 
     def __innit__(self) -> None:
         if not os.path.exists(self._file_name):
@@ -549,7 +553,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
     def query_one(self, query: Callable[[T], bool]) -> CSVResult[T] | None:
         record = self.query(query)
 
-        if not record:
+        if not any(record):
             return None
 
         return record[0]
@@ -594,6 +598,14 @@ class UserRelationshipModel(CSVModel):
     since: int  # unix
 
 
+class ChannelModel(CSVModel):
+    name: str
+    topic: str
+    write_privileges: int
+    read_privileges: int
+    auto_join: bool
+
+
 # Database Models END
 
 
@@ -601,14 +613,14 @@ class UserRelationshipModel(CSVModel):
 
 
 user_db = CSVBasedDatabase[UserModel](
-    file_name="users.csv",
+    file_name="database/users.csv",
     model=UserModel,
     increment_from=3,  # 1 - bot (hardcoded), 2 - peppy (cannot message)
 )
 
 user_stats_db: dict[OsuMode, CSVBasedDatabase[UserStatsModel]] = {
     mode: CSVBasedDatabase[UserStatsModel](
-        file_name=f"user_stats_{mode.name.lower()}.csv",
+        file_name=f"database/user_stats_{mode.name.lower()}.csv",
         model=UserStatsModel,
         increment_from=3,  # 1 - bot (hardcoded), 2 - peppy (cannot message)
     )
@@ -616,8 +628,13 @@ user_stats_db: dict[OsuMode, CSVBasedDatabase[UserStatsModel]] = {
 }
 
 user_relationship_db = CSVBasedDatabase[UserRelationshipModel](
-    file_name="user_relationships.csv",
+    file_name="database/user_relationships.csv",
     model=UserRelationshipModel,
+)
+
+channel_db = CSVBasedDatabase[ChannelModel](
+    file_name="database/channels.csv",
+    model=ChannelModel,
 )
 
 
@@ -627,33 +644,78 @@ user_relationship_db = CSVBasedDatabase[UserRelationshipModel](
 # Database Functions START
 
 
-def insert_user_and_stats(
+class UserCreationResponse(TypedDict):
+    user_id: int
+    user_model: UserModel
+
+
+def create_user_in_database(
     username: str,
     email: str,
     password_md5: str,
-    geoloc: UserGeolocalisation,
-) -> tuple[int, UserModel]:
+    country_acronym: str,
+) -> UserCreationResponse:
+
+    default_perms = BanchoPrivileges.PLAYER | BanchoPrivileges.SUPPORTER
     user_model = UserModel(
         username=username,
         username_safe=safe_string(username),
         email=email,
         password_md5=password_md5,
-        country=geoloc.country_acronym,
-        privileges=(BanchoPrivileges.PLAYER | BanchoPrivileges.SUPPORTER).value,
+        country=country_acronym,
+        privileges=default_perms.value,
         creation_time=int(time.time()),
         latest_activity=int(time.time()),
     )
 
     user_id = user_db.insert(user_model)
-    for mode in OsuMode:
-        user_stats_db[mode].insert(
-            UserStatsModel(
-                user_id=user_id,
-                mode=mode.value,
-            )
-        )
+    return {"user_id": user_id, "user_model": user_model}
 
-    return user_id, user_model
+
+def update_user_in_database(user: User) -> None:
+    user_model = user_db.from_id(user.user_id)
+
+    if not user_model:
+        return  # what
+
+    # update what we can
+    user_model.result.username = user.username
+    user_model.result.username_safe = user.username_safe
+    user_model.result.email = user.email
+    user_model.result.privileges = user.privileges.value
+    user_model.result.silence_end = user.silence_end
+    user_model.result.latest_activity = user.latest_activity
+
+    user_db.update(user.user_id, user_model.result)
+
+
+def create_user_stats_in_database(user_id: int) -> None:
+    for mode in OsuMode:
+        database = user_stats_db[mode]
+
+        user_stats = UserStatsModel(
+            user_id=user_id,
+            mode=mode.value,
+        )
+        database.insert(user_stats)
+
+
+def create_channel_in_database(
+    name: str,
+    topic: str,
+    write_privileges: BanchoPrivileges = BanchoPrivileges.PLAYER,
+    read_privileges: BanchoPrivileges = BanchoPrivileges.PLAYER,
+    auto_join: bool = False,
+) -> None:
+    channel_model = ChannelModel(
+        name=name,
+        topic=topic,
+        write_privileges=write_privileges.value,
+        read_privileges=read_privileges.value,
+        auto_join=auto_join,
+    )
+
+    channel_db.insert(channel_model)
 
 
 # Database Functions END
@@ -1111,6 +1173,14 @@ def create_random_string(n: int) -> str:
     )
 
 
+@dataclass
+class UserGeolocalisation:
+    country_acronym: str
+    country_code: int
+    latitude: float
+    longitude: float
+
+
 async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
     http_client = HTTPClient()
 
@@ -1142,224 +1212,326 @@ async def get_user_geolocalisation(ip: str | None) -> UserGeolocalisation:
     )
 
 
+def check_password(password: str, db_password: str) -> bool:
+    # Since for now we are using md5, we can just compare them.
+    return password == db_password
+
+
 # Helper functions END
 
 
 # Bancho Packets START
 
 
-class BinaryReader:
-    def __init__(self, bytes_data: bytes) -> None:
-        self.__buffer = bytearray(bytes_data)
-        self.__offset = 0
-
-    def __len__(self) -> int:
-        return len(self.__buffer[self.__offset :])
-
-    def read(self, offset: int = -1) -> bytes:
-        if offset < 0:
-            offset = len(self.__buffer) - self.__offset
-
-        data = self.__buffer[self.__offset : self.__offset + offset]
-        self.__offset += offset
-        return data
-
-    def read_osu_header(self) -> tuple[BanchoPacketID, int]:
-        packet_id, size = struct.unpack("<HxI", self.read(HEADER_LEN))
-        return BanchoPacketID(packet_id), size
-
-    def read_int(self, size: int, signed: bool) -> int:
-        return int.from_bytes(
-            self.read(size),
-            byteorder="little",
-            signed=signed,
-        )
-
-    def read_u8(self) -> int:
-        return self.read_int(1, False)
-
-    def read_u16(self) -> int:
-        return self.read_int(2, False)
-
-    def read_i16(self) -> int:
-        return self.read_int(2, True)
-
-    def read_u32(self) -> int:
-        return self.read_int(4, False)
-
-    def read_i32(self) -> int:
-        return self.read_int(4, True)
-
-    def read_u64(self) -> int:
-        return self.read_int(8, False)
-
-    def read_i64(self) -> int:
-        return self.read_int(8, True)
-
-    def read_f32(self) -> float:
-        return struct.unpack("<f", self.read(4))[0]
-
-    def read_f64(self) -> float:
-        return struct.unpack("<f", self.read(8))[0]
-
-    def read_uleb128(self) -> int:
-        if self.read_u8() != 0x0B:
-            return 0
-
-        val = shift = 0
-        while True:
-            b = self.read_u8()
-            val |= (b & 0b01111111) << shift
-            if (b & 0b10000000) == 0:
-                break
-            shift += 7
-        return val
-
-    def read_string(self) -> str:
-        s_len = self.read_uleb128()
-        return self.read(s_len).decode()
-
-    def read_osu_list(self) -> list[int]:
-        count = self.read_u16()
-        return [self.read_i32() for _ in range(count)]
+ByteLike = bytes | bytearray
 
 
-class BinaryWriter:
-    def __init__(self) -> None:
-        self.buffer = bytearray()
+class PacketWriter:
+    __slots__ = ("_packet_id", "_buf")
 
-    def write_raw(self, data: bytes) -> BinaryWriter:
-        self.buffer += data
-        return self
-
-    def write_i8(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<b", data)
-        return self
-
-    def write_u8(self, data: int) -> BinaryWriter:
-        self.buffer.append(data)
-        return self
-
-    def write_i16(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<h", data)
-        return self
-
-    def write_u16(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<H", data)
-        return self
-
-    def write_i32(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<i", data)
-        return self
-
-    def write_u32(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<I", data)
-        return self
-
-    def write_i64(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<q", data)
-        return self
-
-    def write_u64(self, data: int) -> BinaryWriter:
-        self.buffer += struct.pack("<Q", data)
-        return self
-
-    def write_f32(self, data: float) -> BinaryWriter:
-        self.buffer += struct.pack("<f", data)
-        return self
-
-    def write_uleb128(self, data: int) -> BinaryWriter:
-        arr = bytearray()
-        length = 0
-
-        if data == 0:
-            self.write_raw(b"\x00")
-            return self
-
-        while data > 0:
-            arr.append(data & 127)
-            data >>= 7
-            if data != 0:
-                arr[length] |= 128
-            length += 1
-
-        self.write_raw(arr)
-        return self
-
-    def write_string(self, data: str) -> BinaryWriter:
-        if not data:
-            self.write_uleb128(0)
-            return self
-
-        str_bytes = data.encode("utf-8", "ignore")
-        self.write_raw(b"\x0B")
-        self.write_uleb128(len(str_bytes))
-        self.write_raw(str_bytes)
-        return self
-
-    def write_osu_list(self, data: list[int]) -> BinaryWriter:
-        self.write_u16(len(data))
-        for i in data:
-            self.write_i32(i)
-        return self
-
-
-class PacketBuilder(BinaryWriter):
     def __init__(self, packet_id: BanchoPacketID) -> None:
-        self.packet_id = packet_id
-        super().__init__()
+        self._packet_id = packet_id
+        self._buf = bytearray()
+
+    def write_i8(self, value: int) -> PacketWriter:
+        self._buf.append(value)
+        return self
+
+    def write_u8(self, value: int) -> PacketWriter:
+        self._buf.append(value)
+        return self
+
+    def write_i16(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<h", value))
+        return self
+
+    def write_u16(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<H", value))
+        return self
+
+    def write_i32(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<i", value))
+        return self
+
+    def write_u32(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<I", value))
+        return self
+
+    def write_i64(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<q", value))
+        return self
+
+    def write_u64(self, value: int) -> PacketWriter:
+        self._buf.extend(struct.pack("<Q", value))
+        return self
+
+    def write_f32(self, value: float) -> PacketWriter:
+        self._buf.extend(struct.pack("<f", value))
+        return self
+
+    def write_uleb128(self, value: int) -> PacketWriter:
+        while value >= 0x80:
+            self._buf.append((value & 0x7F) | 0x80)
+            value >>= 7
+        self._buf.append(value)
+        return self
+
+    def write_str(self, value: str) -> PacketWriter:
+        # Exists byte.
+        if not value:
+            self.write_i8(0)
+            return self
+
+        self.write_i8(0xB)
+        data = value.encode("utf-8", "ignore")
+        self.write_uleb128(len(data))
+        self._buf.extend(data)
+        return self
+
+    def write_list(self, values: list[int]) -> PacketWriter:
+        self.write_u16(len(values))
+        for value in values:
+            self.write_i32(value)
+        return self
 
     def finish(self) -> bytearray:
         packet_bytes = bytearray()
 
-        packet_bytes += struct.pack("<h", self.packet_id.value)
+        packet_bytes += struct.pack("<h", self._packet_id.value)
         packet_bytes += b"\x00"
-        packet_bytes += struct.pack("<l", len(self.buffer))
-        packet_bytes += self.buffer
+        packet_bytes += struct.pack("<l", len(self._buf))
+        packet_bytes += self._buf
 
         return packet_bytes
 
 
+class PacketReader:
+    __slots__ = (
+        "_buf",
+        "_pos",
+    )
+
+    @property
+    def empty(self) -> bool:
+        return self._pos >= len(self._buf)
+
+    def __init__(self, buf: ByteLike) -> None:
+        self._buf = buf
+        self._pos = 0
+
+    def read_i8(self) -> int:
+        value = self._buf[self._pos]
+        self._pos += 1
+        return value
+
+    def read_u8(self) -> int:
+        value = self._buf[self._pos]
+        self._pos += 1
+        return value
+
+    def read_i16(self) -> int:
+        value = struct.unpack("<h", self._buf[self._pos : self._pos + 2])[0]
+        self._pos += 2
+        return value
+
+    def read_u16(self) -> int:
+        value = struct.unpack("<H", self._buf[self._pos : self._pos + 2])[0]
+        self._pos += 2
+        return value
+
+    def read_i32(self) -> int:
+        value = struct.unpack("<i", self._buf[self._pos : self._pos + 4])[0]
+        self._pos += 4
+        return value
+
+    def read_u32(self) -> int:
+        value = struct.unpack("<I", self._buf[self._pos : self._pos + 4])[0]
+        self._pos += 4
+        return value
+
+    def read_i64(self) -> int:
+        value = struct.unpack("<q", self._buf[self._pos : self._pos + 8])[0]
+        self._pos += 8
+        return value
+
+    def read_u64(self) -> int:
+        value = struct.unpack("<Q", self._buf[self._pos : self._pos + 8])[0]
+        self._pos += 8
+        return value
+
+    def read_f32(self) -> float:
+        value = struct.unpack("<f", self._buf[self._pos : self._pos + 4])[0]
+        self._pos += 4
+        return value
+
+    def read_uleb128(self) -> int:
+        value = 0
+        shift = 0
+        while True:
+            byte = self._buf[self._pos]
+            self._pos += 1
+            value |= (byte & 0x7F) << shift
+            if byte < 0x80:
+                return value
+            shift += 7
+
+    def read_str(self) -> str:
+        if self.read_i8() != 0xB:
+            return ""
+
+        length = self.read_uleb128()
+        string = self._buf[self._pos : self._pos + length].decode()
+        self._pos += length
+        return string
+
+    def read_list(self) -> list[int]:
+        length = self.read_u16()
+        return [self.read_i32() for _ in range(length)]
+
+    def skip(self, length: int) -> None:
+        self._pos += length
+
+    def read_header(self) -> tuple[BanchoPacketID, int]:
+        packet_id = BanchoPacketID(self.read_u16())
+        # Pad byte.
+        self.skip(1)
+        packet_length = self.read_u32()
+        return packet_id, packet_length
+
+    def remove_excess(self, packet_size: int) -> bytes:
+        excess = self._buf[self._pos + packet_size :]
+        self._buf = self._buf[: self._pos + packet_size]
+        return excess
+
+    def __iter__(self) -> PacketReader:
+        return self
+
+    def __next__(self) -> tuple[BanchoPacketID, int]:
+        if self.empty:
+            raise StopIteration
+        return self.read_header()
+
+
+@dataclass
+class PacketContext:
+    id: BanchoPacketID
+    length: int
+    reader: PacketReader
+
+    @staticmethod
+    def create_from_buffers(buf: ByteLike) -> list[PacketContext]:
+        reader = PacketReader(buf)
+        ctxs: list[PacketContext] = []
+
+        while not reader.empty:
+            packet_id, length = reader.read_header()
+            ctxs.append(PacketContext(packet_id, length, reader))
+            reader = PacketReader(reader.remove_excess(length))
+
+        return ctxs
+
+
+PacketHandler = Callable[[PacketReader, "User"], Awaitable[None]]
+
+
+class PacketRouter:
+    __slots__ = ("_restricted_packets", "_handlers")
+
+    def __init__(self) -> None:
+        self._restricted_packets: list[int] = []
+        self._handlers: dict[BanchoPacketID, PacketHandler] = {}
+
+    def add_handler(self, packet_id: BanchoPacketID, restricted=False) -> Callable:
+        def decorator(handler: PacketHandler) -> PacketHandler:
+            self._handlers[packet_id] = handler
+
+            if restricted:
+                self._restricted_packets.append(packet_id.value)
+
+            return handler
+
+        return decorator
+
+    async def route(self, ctx: PacketContext, user: User) -> None:
+        if ctx.id in self._handlers:
+
+            if not ctx.id.value in self._restricted_packets and user.restricted:
+                return
+
+            await self._handlers[ctx.id](ctx.reader, user)
+        else:
+            warning(
+                f"Unhandled packet ID {ctx.id} from {user.username} ({user.user_id})"
+            )
+
+
 def bancho_notification_packet(message: str) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_NOTIFICATION)
-    packet.write_string(message)
+    packet = PacketWriter(BanchoPacketID.SRV_NOTIFICATION)
+    packet.write_str(message)
     return packet.finish()
 
 
 def bancho_login_reply_packet(user_id: int) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_LOGIN_REPLY)
+    packet = PacketWriter(BanchoPacketID.SRV_LOGIN_REPLY)
     packet.write_i32(user_id)
     return packet.finish()
 
 
+def bancho_logout_packet(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_USER_LOGOUT)
+    packet.write_i32(user_id)
+    packet.write_u8(0)
+    return packet.finish()
+
+
 def bancho_protocol_packet() -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_PROTOCOL_VERSION)
+    packet = PacketWriter(BanchoPacketID.SRV_PROTOCOL_VERSION)
     packet.write_i32(19)
     return packet.finish()
 
 
+def bancho_channel_info_packet(channel: BanchoChannel) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_CHANNEL_INFO)
+    packet.write_str(channel.name)
+    packet.write_str(channel.topic)
+    packet.write_u16(len(channel))
+    return packet.finish()
+
+
+def bancho_channel_join_success_packet(channel: BanchoChannel) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_CHANNEL_JOIN_SUCCESS)
+    packet.write_str(channel.name)
+    return packet.finish()
+
+
+def bancho_channel_kick_packet(channel: BanchoChannel) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_CHANNEL_KICK)
+    packet.write_str(channel.name)
+    return packet.finish()
+
+
 def bancho_channel_info_end_packet() -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_CHANNEL_INFO_END)
+    packet = PacketWriter(BanchoPacketID.SRV_CHANNEL_INFO_END)
     packet.write_u32(0)
     return packet.finish()
 
 
 def bancho_silence_end_packet(silence_end: int) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_SILENCE_END)
+    packet = PacketWriter(BanchoPacketID.SRV_SILENCE_END)
     packet.write_u32(silence_end)
     return packet.finish()
 
 
 def bancho_login_perms_packet(privileges: int) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_PRIVILEGES)
+    packet = PacketWriter(BanchoPacketID.SRV_PRIVILEGES)
     packet.write_u32(privileges)
     return packet.finish()
 
 
 def bancho_user_presence_packet(user: User) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_USER_PRESENCE)
+    packet = PacketWriter(BanchoPacketID.SRV_USER_PRESENCE)
     packet.write_i32(user.user_id)
-    packet.write_string(user.username)
+    packet.write_str(user.username)
     packet.write_u8(user.utc_offset + 24)
     packet.write_u8(user.geoloc.country_code)
     packet.write_u8(user.privileges)
@@ -1370,11 +1542,11 @@ def bancho_user_presence_packet(user: User) -> bytes:
 
 
 def bancho_user_stats_packet(user: User) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_USER_STATS)
+    packet = PacketWriter(BanchoPacketID.SRV_USER_STATS)
     packet.write_i32(user.user_id)
     packet.write_u8(user.status.action.value)
-    packet.write_string(user.status.action_text)
-    packet.write_string(user.status.action_md5)
+    packet.write_str(user.status.action_text)
+    packet.write_str(user.status.action_md5)
     packet.write_i32(user.status.mods.value)
     packet.write_u8(user.status.mode.value)
     packet.write_i32(user.status.beatmap_id)
@@ -1389,84 +1561,226 @@ def bancho_user_stats_packet(user: User) -> bytes:
 
 
 def bancho_user_friends_packet(friends_list: list[int]) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_FRIENDS_LIST)
-    packet.write_osu_list(friends_list)
+    packet = PacketWriter(BanchoPacketID.SRV_FRIENDS_LIST)
+    packet.write_list(friends_list)
     return packet.finish()
 
 
 def bancho_server_restart_packet(ms: int) -> bytes:
-    packet = PacketBuilder(BanchoPacketID.SRV_RESTART)
+    packet = PacketWriter(BanchoPacketID.SRV_RESTART)
     packet.write_i32(ms)
     return packet.finish()
 
 
-packet_handlers: dict[
-    BanchoPacketID, Callable[[BinaryReader, User], Awaitable[None]]
-] = {}
+packets_router = PacketRouter()
 
 
-def register_packet_handler(packet_id: BanchoPacketID) -> Callable:
-    def decorator(handler: Callable[[BinaryReader, User], Awaitable[None]]) -> Callable:
-        packet_handlers[packet_id] = handler
-        return handler
-
-    return decorator
-
-
-@register_packet_handler(BanchoPacketID.OSU_HEARTBEAT)
-async def handle_heartbeat(_: BinaryReader, __: User) -> None:
+@packets_router.add_handler(BanchoPacketID.OSU_HEARTBEAT, restricted=True)
+async def bancho_heartbeat_handler(reader: PacketReader, user: User) -> None:
     pass
 
 
-@register_packet_handler(BanchoPacketID.OSU_CHANGE_ACTION)
-async def handle_change_action(reader: BinaryReader, user: User) -> None:
+@packets_router.add_handler(BanchoPacketID.OSU_CHANGE_ACTION, restricted=True)
+async def bancho_change_action_handler(reader: PacketReader, user: User) -> None:
     user.status.action = BanchoAction(reader.read_u8())
-    user.status.action_text = reader.read_string()
-    user.status.action_md5 = reader.read_string()
+    user.status.action_text = reader.read_str()
+    user.status.action_md5 = reader.read_str()
     user.status.mods = OsuMods(reader.read_i32())
     user.status.mode = OsuMode(reader.read_u8())
     user.status.beatmap_id = reader.read_i32()
 
     if not user.restricted:
-        broadcast_to_all(bancho_user_stats_packet(user))
+        broadcast_to_online_users(bancho_user_stats_packet(user))
 
 
-@register_packet_handler(BanchoPacketID.OSU_REQUEST_STATUS_UPDATE)
-async def handle_request_status_update(_: BinaryReader, user: User) -> None:
+@packets_router.add_handler(BanchoPacketID.OSU_REQUEST_STATUS_UPDATE, restricted=True)
+async def bancho_request_status_update_handler(
+    reader: PacketReader, user: User
+) -> None:
     user.enqueue(bancho_user_stats_packet(user))
 
 
-@register_packet_handler(BanchoPacketID.OSU_USER_STATS_REQUEST)
-async def handle_user_stats_request(reader: BinaryReader, user: User) -> None:
-    user_ids = reader.read_osu_list()
+@packets_router.add_handler(BanchoPacketID.OSU_USER_STATS_REQUEST, restricted=True)
+async def bancho_user_stats_request_handler(reader: PacketReader, user: User) -> None:
+    user_ids = reader.read_list()
 
     for user_id in filter(lambda x: x != user.user_id, user_ids):
-        osu_token = users_id_lookup_cache.get(user_id)
-        if osu_token is None:
+        token = user_id_to_token.get(user_id)
+        if token is None:
             continue
 
-        requested_user = users_cache.get(osu_token)
+        requested_user = users.get(token)
         if requested_user is None:
             continue
 
         if requested_user.restricted:
             continue
 
+        user.enqueue(bancho_user_stats_packet(requested_user))
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_USER_PRESENCE_REQUEST)
+async def bancho_user_presence_request_handler(
+    reader: PacketReader, user: User
+) -> None:
+    user_ids = reader.read_list()
+
+    for user_id in user_ids:
+        token = user_id_to_token.get(user_id)
+        if token is None:
+            continue
+
+        requested_user = users.get(token)
+        if requested_user is None:
+            continue
+
         user.enqueue(bancho_user_presence_packet(requested_user))
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_USER_PRESENCE_REQUEST_ALL)
+async def bancho_user_stats_request_all_handler(
+    reader: PacketReader, user: User
+) -> None:
+    buffer = bytearray()
+    for online_user in users.values():
+        if online_user.restricted:
+            continue
+
+        buffer += bancho_user_presence_packet(online_user)
+
+    user.enqueue(bytes(buffer))
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_CHANNEL_JOIN, restricted=True)
+async def bancho_channel_join_handler(reader: PacketReader, user: User) -> None:
+    channel_name = reader.read_str()
+    channel = channels.get(channel_name)
+
+    if channel is None or not user.join_channel(channel):
+        error(f"{user.username} failed to join {channel_name}")
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_CHANNEL_PART, restricted=True)
+async def bancho_channel_part_handler(reader: PacketReader, user: User) -> None:
+    channel_name = reader.read_str()
+
+    if channel_name in ["#userlog"]:
+        return
+
+    channel = channels.get(channel_name)
+
+    if channel is None or not user.leave_channel(channel):
+        error(f"{user.username} failed to leave {channel_name}")
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_LOGOUT, restricted=True)
+async def bancho_logout_handler(reader: PacketReader, user: User) -> None:
+    if (time.time() - user.login_time) < 1:
+        return
+
+    user.logout()
+    user.update_user()
 
 
 # Bancho Packets END
 
 
-# Bancho Models START
+# Budget Redis START
+
+
+def __partition(array: list[LeaderboardEntry], low: int, high: int) -> int:
+    i = low - 1
+    j = low
+
+    while j < high:
+        if array[j]["score"] > array[high]["score"]:
+            array[i + 1], array[j] = array[j], array[i + 1]
+            i += 1
+        j += 1
+
+    array[i + 1], array[high] = array[high], array[i + 1]
+    return i + 1
+
+
+def reversed_quick_sort(array: list[LeaderboardEntry], low: int, high: int) -> None:
+    if low < high:
+        pi = __partition(array, low, high)
+        reversed_quick_sort(array, low, pi - 1)
+        reversed_quick_sort(array, pi + 1, high)
+
+
+def sort_leaderboard(array: list[LeaderboardEntry]):
+    reversed_quick_sort(array, 0, len(array) - 1)
+
+
+class LeaderboardEntry(TypedDict):
+    user_id: int
+    score: int
+
+
+class BanchoLeaderboard:
+    __slots__ = ("_lock", "_leaderboard", "_lookup_table")
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._leaderboard: list[LeaderboardEntry] = []
+        self._lookup_table: dict[int, int] = {}  # user_id -> placement
+
+    def __len__(self) -> int:
+        return len(self._leaderboard)
+
+    async def _rebuild_leaderboard(self) -> None:
+        async with self._lock:
+            sort_leaderboard(self._leaderboard)
+            for placement, entry in enumerate(self._leaderboard):
+                self._lookup_table[entry["user_id"]] = placement
+
+    async def get_placement(self, user_id: int) -> int | None:
+        async with self._lock:
+            return self._lookup_table.get(user_id)
+
+    async def add_entry(self, user_id: int, score: int) -> None:
+        async with self._lock:
+            if user_id in self._lookup_table:
+                self._leaderboard[self._lookup_table[user_id]]["score"] = score
+            else:
+                self._leaderboard.append({"user_id": user_id, "score": score})
+
+        await self._rebuild_leaderboard()
+
+    async def update_entry(self, user_id: int, score: int) -> None:
+        await self.add_entry(user_id, score)
+
+    async def remove_entry(self, user_id: int) -> None:
+        async with self._lock:
+            placement = self._lookup_table.pop(user_id)
+            self._leaderboard.pop(placement)
+
+        await self._rebuild_leaderboard()
+
+
+# fmt: off
+leaderboards = {
+    mode: BanchoLeaderboard()
+    for mode in OsuMode
+}
+# fmt: on
+
+
+# Budget Redis END
+
+
+# Bancho Objects START
 
 
 @dataclass
-class UserGeolocalisation:
-    country_acronym: str
-    country_code: int
-    latitude: float
-    longitude: float
+class BanchoUserStatus:
+    action: BanchoAction = BanchoAction.IDLE
+    action_text: str = ""
+    action_md5: str = ""
+    mods: OsuMods = OsuMods.NOMOD
+    mode: OsuMode = OsuMode.OSU
+    beatmap_id: int = 0
 
 
 @dataclass
@@ -1483,37 +1797,19 @@ class UserStatistics:
     rank: int
 
     @staticmethod
-    def from_database(_id: int, mode: OsuMode) -> UserStatistics | None:
-        database = user_stats_db.get(mode)
-        if database is None:
-            return None
-
-        record = database.from_id(_id)
-        if record is None:
-            return None
-
+    def from_model(model: UserStatsModel) -> UserStatistics:
         return UserStatistics(
-            total_score=record.result.total_score,
-            ranked_score=record.result.ranked_score,
-            pp=record.result.pp,
-            playcount=record.result.playcount,
-            playtime=record.result.playtime,
-            accuracy=record.result.accuracy,
-            max_combo=record.result.max_combo,
-            total_hits=record.result.total_hits,
-            level=record.result.level,
-            rank=-1,
+            total_score=model.total_score,
+            ranked_score=model.ranked_score,
+            pp=model.pp,
+            playcount=model.playcount,
+            playtime=model.playtime,
+            accuracy=model.accuracy,
+            max_combo=model.max_combo,
+            total_hits=model.total_hits,
+            level=model.level,
+            rank=0,
         )
-
-
-@dataclass
-class UserStatus:
-    action: BanchoAction = BanchoAction.IDLE
-    action_text: str = ""
-    action_md5: str = ""
-    mods: OsuMods = OsuMods.NOMOD
-    mode: OsuMode = OsuMode.OSU
-    beatmap_id: int = 0
 
 
 @dataclass
@@ -1521,6 +1817,8 @@ class User:
     user_id: int
     username: str
     username_safe: str
+
+    email: str
 
     osu_token: str
     osu_version: str
@@ -1535,13 +1833,19 @@ class User:
     login_time: int
     latest_activity: int
 
-    status: UserStatus = field(default_factory=UserStatus)
     stats: dict[OsuMode, UserStatistics] = field(default_factory=dict)
+    status: BanchoUserStatus = field(default_factory=BanchoUserStatus)
 
     friends: list[int] = field(default_factory=list)
+    blocks: list[int] = field(default_factory=list)
 
-    is_bot: bool = False
+    channels: list[BanchoChannel] = field(default_factory=list)
+    spectators: list[User] = field(default_factory=list)
+    spectating: User | None = None
 
+    in_lobby: bool = False
+
+    is_bot_client: bool = False
     _packet_queue = bytearray()
 
     @property
@@ -1554,25 +1858,41 @@ class User:
 
     def fetch_stats_from_database(self) -> None:
         for mode in OsuMode:
-            stats = UserStatistics.from_database(self.user_id, mode)
-            assert stats is not None
-            self.stats[mode] = stats
+            record = user_stats_db[mode].from_id(self.user_id)
 
-    def fetch_current_ranks(self) -> None:
+            assert record is not None
+            self.stats[mode] = UserStatistics.from_model(record.result)
+
+    async def update_ranks(self) -> None:
         for mode in OsuMode:
-            self.stats[mode].rank = get_user_rank(self.user_id, mode)
+            placement = await leaderboards[mode].get_placement(self.user_id)
+            if placement is not None:
+                self.stats[mode].rank = placement + 1
+            else:
+                self.stats[mode].rank = 0
 
-    def fetch_friends_from_database(self) -> None:
+    def fetch_friends_and_blocks_from_database(self) -> None:
         friends = user_relationship_db.query(
             lambda x: x.user_id == self.user_id
             and x.relation_type == OsuRelationship.FRIEND
         )
 
+        blocks = user_relationship_db.query(
+            lambda x: x.user_id == self.user_id
+            and x.relation_type == OsuRelationship.BLOCK
+        )
+
         # Bot is friends with everyone.
         self.friends = [1] + [record.result.friend_id for record in friends]
+        self.blocks = [record.result.friend_id for record in blocks]
 
-    def presence_and_stats(self) -> bytes:
+    def presence_and_stats_packet(self) -> bytes:
         return bancho_user_presence_packet(self) + bancho_user_stats_packet(self)
+
+    def update_user(self) -> None:
+        self.latest_activity = int(time.time())
+
+        update_user_in_database(self)
 
     def enqueue(self, data: bytes) -> None:
         self._packet_queue += data
@@ -1582,15 +1902,143 @@ class User:
         self._packet_queue.clear()
         return data
 
+    def join_channel(self, channel: BanchoChannel) -> bool:
+        if (
+            self in channel.users
+            or not channel.can_read(self.privileges)
+            or channel._name == "#lobby"
+            and not self.in_lobby
+        ):
+            return False
 
-# Bancho Models END
+        channel.append(self)
+        self.channels.append(channel)
+
+        self.enqueue(bancho_channel_join_success_packet(channel))
+
+        channel.send_updates()
+        return True
+
+    def leave_channel(self, channel: BanchoChannel, kick: bool = False) -> bool:
+        if self not in channel.users:
+            return False
+
+        channel.remove(self)
+        self.channels.remove(channel)
+
+        if kick:
+            self.enqueue(bancho_channel_kick_packet(channel))
+
+        channel.send_updates()
+        return True
+
+    def logout(self) -> None:
+        token = self.osu_token
+        self.osu_token = ""
+
+        # TODO: multiplayer check
+
+        # TODO: spectator check
+
+        while self.channels:
+            self.leave_channel(self.channels[0])
+
+        users.pop(token)
+        user_id_to_token.pop(self.user_id)
+
+        if not self.restricted:
+            broadcast_to_online_users(bancho_logout_packet(self.user_id))
+
+
+@dataclass
+class BanchoChannel:
+    _name: str
+    topic: str
+    write_privileges: BanchoPrivileges
+    read_privileges: BanchoPrivileges
+    auto_join: bool
+
+    temporary: bool = False
+    users: list[User] = field(default_factory=list)
+
+    def __len__(self) -> int:
+        return len(self.users)
+
+    @property
+    def _fixed_name(self) -> str:
+        if self._name.startswith("#"):
+            return self._name
+
+        return f"#{self._name}"
+
+    @property
+    def name(self) -> str:
+        if self._fixed_name.startswith("#spec_"):
+            return "#spectator"
+        elif self._fixed_name.startswith("#multi_"):
+            return "#multiplayer"
+
+        return self._fixed_name
+
+    def can_read(self, privs: BanchoPrivileges) -> bool:
+        return privs & self.read_privileges != 0
+
+    def can_write(self, privs: BanchoPrivileges) -> bool:
+        return privs & self.write_privileges != 0
+
+    @staticmethod
+    def from_model(model: ChannelModel) -> BanchoChannel:
+        return BanchoChannel(
+            _name=model.name,
+            topic=model.topic,
+            write_privileges=BanchoPrivileges(model.write_privileges),
+            read_privileges=BanchoPrivileges(model.read_privileges),
+            auto_join=model.auto_join,
+        )
+
+    def append(self, user: User) -> None:
+        self.users.append(user)
+
+    def remove(self, user: User) -> None:
+        self.users.remove(user)
+
+        if not any(self.users) and self.temporary:
+            del channels[self.name]
+
+    def send_updates(self) -> None:
+        channel_packet = bancho_channel_info_packet(self)
+
+        if self.temporary:
+            self.enqueue(channel_packet)
+        else:
+            for user in users.values():
+                if self.can_read(user.privileges):
+                    user.enqueue(channel_packet)
+
+    def enqueue(self, data: bytes, exclude: list[int] = []) -> None:
+        for user in self.users:
+            if user.user_id not in exclude:
+                user.enqueue(data)
+
+
+users: dict[str, User] = {}
+user_id_to_token: dict[int, str] = {}
+channels: dict[str, BanchoChannel] = {}
+
+
+def broadcast_to_online_users(data: bytes, exclude: list[int] = []) -> None:
+    for user in users.values():
+        if user.user_id not in exclude:
+            user.enqueue(data)
+
+
+# Bancho Objects END
 
 
 # Bancho Bot START
 
 
 class BanchoBot(User):
-
     def __init__(self) -> None:
         self.user_id = 1
         self.username = "Męski oszuścik"
@@ -1604,7 +2052,7 @@ class BanchoBot(User):
         self.privileges = BanchoPrivileges.PLAYER | BanchoPrivileges.DEVELOPER
 
         self.geoloc = UserGeolocalisation(
-            country_acronym="RO",
+            country_acronym="ro",
             country_code=COUNTRY_CODES["ro"],
             # Pyongyang, North Korea.
             latitude=39.039219,
@@ -1615,12 +2063,12 @@ class BanchoBot(User):
         self.login_time = int(time.time())
         self.latest_activity = int(time.time())
 
-        self.status = UserStatus(
+        self.status = BanchoUserStatus(
             action=BanchoAction.TESTING,
             action_text="users patience.",
         )
 
-        self.is_bot = True
+        self.is_bot_client = True
 
     def enqueue(self, data: bytes) -> None:
         pass
@@ -1644,83 +2092,165 @@ class BanchoBot(User):
 # Bancho Bot END
 
 
-# Bancho Cache START
-
-
-users_id_lookup_cache: dict[int, str] = {}  # user_id: uuid
-users_cache: dict[str, User] = {}  # uuid: User
-
-# Son: Mum can we have redis?
-# Mum: We have redis at home.
-# Redis at home START:
-
-
-users_leaderboards: dict[OsuMode, list[tuple[int, int]]] = {
-    mode: [] for mode in OsuMode
-}  # mode: [tuple(user_id, pp)]
-
-
-def add_user_to_leaderboards(user: User) -> None:
-    for mode in OsuMode:
-        users_leaderboards[mode].append((user.user_id, user.stats[mode].pp))
-    sort_leaderboards()
-
-
-def sort_leaderboards() -> None:
-    for mode in OsuMode:
-        leaderboard = users_leaderboards[mode]
-        leaderboard.sort(key=lambda x: x[1], reverse=True)
-        users_leaderboards[mode] = leaderboard
-
-
-def initialise_users_leaderboards() -> None:
-    for mode in OsuMode:
-        database = user_stats_db[mode]
-        stats = database.all()
-
-        for record in stats:
-            users_leaderboards[mode].append((record.result.user_id, record.result.pp))
-
-    sort_leaderboards()
-
-
-def get_user_rank(user_id: int, mode: OsuMode) -> int:
-    leaderboard = users_leaderboards[mode]
-    for rank, (_id, _) in enumerate(leaderboard, start=1):
-        if user_id == _id:
-            return rank
-
-    return 0
-
-
-# Redis at home END
-
-
-def broadcast_to_all(data: bytes) -> None:
-    for user in users_cache.values():
-        user.enqueue(data)
-
-
-# TODO: extend this function
-async def add_user_globally(user: User) -> None:
-    users_id_lookup_cache[user.user_id] = user.osu_token
-    users_cache[user.osu_token] = user
-
-
-# Bancho Cache END
-
-
 # Bancho HTTP Logic START
 
 
 bancho_router = Router(
     {
-        "c.akatsuki.gg",
-        "ce.akatsuki.gg",
-        "c4.akatsuki.gg",
-        "c6.akatsuki.gg",
+        f"c.{MAIN_DOMAIN}",
+        f"ce.{MAIN_DOMAIN}",
+        f"c4.{MAIN_DOMAIN}",
+        f"c6.{MAIN_DOMAIN}",
     }
-)  # funny meme
+)
+
+
+async def bancho_post(request: HTTPRequest) -> None:
+    if request.headers["user-agent"] != "osu!":
+        await bancho_get(request)
+        return
+
+    osu_token = request.headers.get("osu-token")
+    if osu_token is None:
+        login_response = await bancho_login_handler(request)
+        await request.send_response(
+            status_code=200,
+            headers={"cho-token": login_response["osu_token"]},
+            body=login_response["packets"],
+        )
+        return
+
+    user = users.get(osu_token)
+    if user is None:
+        await request.send_response(
+            status_code=200,
+            body=bancho_notification_packet("Server has restarted!")
+            + bancho_server_restart_packet(0),
+        )
+        return
+
+    packets = PacketContext.create_from_buffers(request.body)
+    for packet in packets:
+        await packets_router.route(packet, user)
+
+    user.latest_activity = int(time.time())
+    response = user.dequeue()
+
+    await request.send_response(
+        status_code=200,
+        body=response,
+    )
+
+
+class BanchoLoginResponse(TypedDict):
+    osu_token: str
+    packets: bytes
+
+
+async def bancho_login_handler(request: HTTPRequest) -> BanchoLoginResponse:
+    username, password_hash, additional_data, _ = request.body.decode().split("\n")
+    osu_ver, utc_offset, _, _, pm_private = additional_data.split("|")
+
+    geolocalisation = await get_user_geolocalisation(
+        request.headers.get("x-forwarded-for")
+    )
+
+    packet_response = bytearray()
+
+    user_result = user_db.query_one(lambda x: x.username_safe == safe_string(username))
+    if user_result is None:
+        just_registered = True
+        user_resp = create_user_in_database(
+            username=username,
+            email=f"changeme_{create_random_string(10)}@lol.xd",
+            password_md5=password_hash,
+            country_acronym=geolocalisation.country_acronym,
+        )
+
+        user_id = user_resp["user_id"]
+        user_model = user_resp["user_model"]
+        create_user_stats_in_database(user_id)
+    else:
+        just_registered = False
+        user_id = user_result.id
+        user_model = user_result.result
+
+    if not check_password(password_hash, user_model.password_md5):
+        return {
+            "osu_token": "invalid-password",
+            "packets": (
+                bancho_login_reply_packet(-1)
+                + bancho_notification_packet("onecho!: Invalid password.")
+            ),
+        }
+
+    user = User(
+        user_id=user_id,
+        username=user_model.username,
+        username_safe=user_model.username_safe,
+        osu_token=create_random_string(32),
+        osu_version=osu_ver,
+        email=user_model.email,
+        utc_offset=int(utc_offset),
+        pm_private=bool(int(pm_private)),
+        privileges=BanchoPrivileges(user_model.privileges),
+        geoloc=geolocalisation,
+        silence_end=user_model.silence_end,
+        login_time=int(time.time()),
+        latest_activity=int(time.time()),
+    )
+    user.fetch_stats_from_database()
+    user.fetch_friends_and_blocks_from_database()
+
+    if just_registered:
+        for mode in OsuMode:
+            await leaderboards[mode].add_entry(
+                user_id=user.user_id,
+                score=0,
+            )
+
+    await user.update_ranks()
+
+    packet_response += bancho_login_reply_packet(user.user_id)
+    packet_response += bancho_protocol_packet()
+
+    for channel in channels.values():
+        if (
+            not channel.auto_join
+            or not channel.can_read(user.privileges)
+            or channel._fixed_name == "#lobby"
+        ):
+            continue
+
+        chan_packet = bancho_channel_info_packet(channel)
+        packet_response += chan_packet
+
+        for u in users.values():
+            if channel.can_read(u.privileges):
+                u.enqueue(chan_packet)
+
+    packet_response += bancho_channel_info_end_packet()
+    packet_response += bancho_silence_end_packet(user.silence_end)
+    packet_response += bancho_login_perms_packet(user.privileges)
+
+    for online_user in users.values():
+        packet_response += online_user.presence_and_stats_packet()
+
+    packet_response += user.presence_and_stats_packet()
+    packet_response += bancho_user_friends_packet(user.friends)
+
+    quote = random.choice(QUOTES)
+    packet_response += bancho_notification_packet(f"onecho! - {quote}")
+
+    users[user.osu_token] = user
+    user_id_to_token[user.user_id] = user.osu_token
+
+    user.update_user()
+    return {
+        "osu_token": user.osu_token,
+        "packets": packet_response,
+    }
+
 
 QUOTES = [
     "Commit your RealistikPanel changes.",
@@ -1733,6 +2263,7 @@ QUOTES = [
     "'shoot yourself' - 'i mean shoot your shot",
     "ZE CO DO CHUJA?",
 ]
+
 GIFS = [
     "https://media1.tenor.com/m/omHmObRADasAAAAd/finnish-hospital-kys.gif",
     "https://cdn.discordapp.com/attachments/748687781605408911/1241086998471508179/caption-6.gif?ex=66c43016&is=66c2de96&hm=ad646c33412aedfc6c1ce847a40b9ca951118a6e497d0dded14f89c9a41edc96&",
@@ -1753,146 +2284,49 @@ GIFS = [
 
 
 async def bancho_get(request: HTTPRequest) -> None:
-    very_cool = random.choice(QUOTES)
-    piwko_of_today = random.choice(GIFS)
-    rapapara = f"""
+    quote = random.choice(QUOTES)
+    gif = random.choice(GIFS)
+
+    html_response = f"""
     <center style='font-family: "Comic Sans MS", "Comic Sans", cursive;'>
-        <h1>onecho!</h1> <h2>{very_cool}</h2> <br> <img src='{piwko_of_today}'>
+        <h1>onecho!</h1> <h2>{quote}</h2> <br> <img src='{gif}'>
     </center>
     """
+
     await request.send_response(
         status_code=200,
-        body=rapapara.encode("utf-8"),
+        body=html_response.encode("utf-8"),
         headers={
             "Content-Type": "text/html; charset=utf-8",
         },
     )
 
 
-async def bancho_post(request: HTTPRequest) -> None:
-    if request.headers["user-agent"] != "osu!":
-        await bancho_get(request)
-        return
-
-    osu_token = request.headers.get("osu-token")
-    if osu_token is None:
-        uuid, packets = await bancho_login_handler(request)
-        await request.send_response(
-            status_code=200,
-            headers={"cho-token": uuid},
-            body=packets,
-        )
-        return
-
-    user = users_cache.get(osu_token)
-    if user is None:
-        await request.send_response(
-            status_code=200,
-            body=bancho_notification_packet("Server has restarted!")
-            + bancho_server_restart_packet(0),
-        )
-        return
-
-    reader = BinaryReader(request.body)
-    while len(reader):
-        packet_id, size = reader.read_osu_header()
-        packet_reader = BinaryReader(reader.read(size))
-
-        if packet_id in packet_handlers:
-            await packet_handlers[packet_id](packet_reader, user)
-        else:
-            warning(f"Unhandled packet ID {packet_id} from {user.username}")
-
-    user.latest_activity = int(time.time())
-
-    response = user.dequeue()
-    await request.send_response(
-        status_code=200,
-        body=response,
-    )
-
-
-async def bancho_login_handler(request: HTTPRequest) -> tuple[str, bytes]:
-    username, password_hash, additional_data, _ = request.body.decode().split("\n")
-    osu_ver, utc_offset, _, _, pm_private = additional_data.split("|")
-
-    geolocalisation = await get_user_geolocalisation(
-        request.headers.get("x-forwarded-for")
-    )
-
-    packet_response = bytearray()
-
-    user_result = user_db.query_one(lambda x: x.username_safe == safe_string(username))
-    if user_result is None:
-        user_id, user_model = insert_user_and_stats(
-            username=username,
-            email=f"changeme_{create_random_string(10)}@lol.xd",
-            password_md5=password_hash,
-            geoloc=geolocalisation,
-        )
-        freshly_registered = True
-    else:
-        user_id = user_result.id
-        user_model = user_result.result
-        freshly_registered = False
-
-    user = User(
-        user_id=user_id,
-        username=user_model.username,
-        username_safe=user_model.username_safe,
-        osu_token=create_random_string(32),
-        osu_version=osu_ver,
-        utc_offset=int(utc_offset),
-        pm_private=bool(int(pm_private)),
-        privileges=BanchoPrivileges(user_model.privileges),
-        geoloc=geolocalisation,
-        silence_end=user_model.silence_end,
-        login_time=int(time.time()),
-        latest_activity=int(time.time()),
-    )
-    user.fetch_stats_from_database()
-    user.fetch_friends_from_database()
-
-    if freshly_registered:
-        add_user_to_leaderboards(user)
-    user.fetch_current_ranks()
-
-    packet_response += bancho_login_reply_packet(user.user_id)
-    packet_response += bancho_protocol_packet()
-    packet_response += bancho_channel_info_end_packet()
-    packet_response += bancho_silence_end_packet(user.silence_end)
-    packet_response += bancho_login_perms_packet(user.privileges)
-
-    for online_user in users_cache.values():
-        packet_response += online_user.presence_and_stats()
-
-    packet_response += user.presence_and_stats()
-    packet_response += bancho_user_friends_packet(user.friends)
-
-    piwko_of_today = random.choice(QUOTES)
-    packet_response += bancho_notification_packet(f"onecho! - {piwko_of_today}")
-
-    await add_user_globally(user)
-    return user.osu_token, packet_response
-
-
 @bancho_router.add_endpoint("/", methods=["GET", "POST"])
 async def bancho_root_handler(request: HTTPRequest) -> None:
-    if request.method == "GET":
-        await bancho_get(request)
-        return
-
-    await bancho_post(request)
+    match request.method:
+        case "GET":
+            await bancho_get(request)
+        case "POST":
+            await bancho_post(request)
+        case _:
+            raise ValueError("Not allowed method.")
 
 
 # Bancho HTTP Logic END
 
+
 # Avatar Domain START
 
-avatar_router = Router("a.akatsuki.gg")
 
-with open("avatars/default.png", "rb") as f:
-    DEFAULT_AVATAR_BYTES = f.read()
+avatar_router = Router(f"a.{MAIN_DOMAIN}")
+
+if os.path.exists("avatars/default.png"):
+    with open("avatars/default.png", "rb") as f:
+        DEFAULT_AVATAR_BYTES = f.read()
+else:
+    DEFAULT_AVATAR_BYTES = b""
+
 
 @avatar_router.add_endpoint("/{}", methods=["GET"])
 async def avatar_handler(request: HTTPRequest) -> None:
@@ -1922,28 +2356,65 @@ async def avatar_handler(request: HTTPRequest) -> None:
     )
 
 
+# Avatar Domain END
+
+
 # Server Entry Point START
+
+
+DEFAULT_CHANNELS = [
+    ChannelModel(
+        name="osu",
+        topic="Welcome to onecho!",
+        write_privileges=BanchoPrivileges.PLAYER.value,
+        read_privileges=BanchoPrivileges.PLAYER.value,
+        auto_join=True,
+    ),
+    ChannelModel(
+        name="lobby",
+        topic="Lobby discussion channel.",
+        write_privileges=BanchoPrivileges.PLAYER.value,
+        read_privileges=BanchoPrivileges.PLAYER.value,
+        auto_join=False,
+    ),
+    ChannelModel(
+        name="polish",
+        topic="POLISH MOUNTAIN JEBAC KURWY",
+        write_privileges=BanchoPrivileges.PLAYER.value,
+        read_privileges=BanchoPrivileges.PLAYER.value,
+        auto_join=False,
+    ),
+]
 
 
 async def main() -> int:
     # Initialise bot
     bancho_bot = BanchoBot()
-    await add_user_globally(bancho_bot)
+    users[bancho_bot.osu_token] = bancho_bot
+    user_id_to_token[bancho_bot.user_id] = bancho_bot.osu_token
 
-    initialise_users_leaderboards()
+    # Initialise leaderboards
+    for mode in OsuMode:
+        records = user_stats_db[mode].all()
+        for record in records:
+            await leaderboards[mode].add_entry(
+                user_id=record.result.user_id,
+                score=record.result.pp,
+            )
+
+    # Initialise channels
+    if not len(channel_db):
+        for channel in DEFAULT_CHANNELS:
+            channel_db.insert(channel)
+
+    for channel in channel_db.all():
+        # hashtag is reserved for removed databases entries so we have to improvise
+        channels[f"#{channel.result.name}"] = BanchoChannel.from_model(channel.result)
 
     # Initialise server
     server = AsyncHTTPServer(address="127.0.0.1", port=2137)
     server.add_router(bancho_router)
     server.add_router(avatar_router)
-
-    @server.on_start_server
-    async def on_start_server() -> None:
-        info("Server started!")
-
-    @server.on_close_server
-    async def on_close_server() -> None:
-        info("Server closed!")
 
     await server.start_server()
     return 0

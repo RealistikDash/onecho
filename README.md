@@ -1,11 +1,11 @@
 # onecho
-A single-file, dependency-less osu! server implementation.
+A single-file, dependency-less osu! server stack implementation.
 
 ## Rules
 This project follows four core rules:
 - All code must be in a single Python file.
 - No modules may be used outside of the Python standard library (meaning many things must be implemented by us)
-- No `re` (regex) library allowed to make the game funnier.
+- No `re` (regex) or `sqlite3` library allowed to make the game funnier.
 - Haveing fun.
 
 ## Progress
@@ -31,13 +31,21 @@ Packets:
 - [x] Binary Writer
 - [x] Binary Reader
 - [x] Builder API for writer
-- [ ] Packet registration router
+- [x] Packet registration router
 - [x] Packet registration decorator
 
 Bancho:
-- [ ] User Login
+- [x] User Login
+- [x] User Logout
 - [x] User Actions
+- [ ] Server Bot
+- [ ] Lobby
+- [ ] User Relationships
 - [ ] Private Chat
 - [ ] Public Chat
 - [ ] Spectator
-- [ ] Channel
+- [ ] Match
+- [x] Channel
+
+Avatar:
+- [x] Avatar serving
