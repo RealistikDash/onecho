@@ -1774,6 +1774,18 @@ async def bancho_friend_remove_handler(reader: PacketReader, user: User) -> None
     user.remove_friend(user_id)
 
 
+@packets_router.add_handler(BanchoPacketID.OSU_JOIN_LOBBY)
+async def bancho_join_lobby_handler(reader: PacketReader, user: User) -> None:
+    user.in_lobby = True
+
+    # TODO: list all matches
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_PART_LOBBY)
+async def bancho_part_lobby_handler(reader: PacketReader, user: User) -> None:
+    user.in_lobby = False
+
+
 # Bancho Packets END
 
 
