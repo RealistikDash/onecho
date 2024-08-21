@@ -1598,6 +1598,35 @@ def bancho_user_friends_packet(friends_list: list[int]) -> bytes:
     return packet.finish()
 
 
+def bancho_user_dm_blocked_packet(username: str) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_USER_DM_BLOCKED)
+    packet.write_str("")
+    packet.write_str("")
+    packet.write_str(username)
+    packet.write_i32(0)
+    return packet.finish()
+
+
+def bancho_user_silenced_packet(username: str) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_TARGET_IS_SILENCED)
+    packet.write_str("")
+    packet.write_str("")
+    packet.write_str(username)
+    packet.write_i32(0)
+    return packet.finish()
+
+
+def bancho_send_message_packet(
+    sender: str, message: str, recipient: str, sender_id: int
+) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SEND_MESSAGE)
+    packet.write_str(sender)
+    packet.write_str(message)
+    packet.write_str(recipient)
+    packet.write_i32(sender_id)
+    return packet.finish()
+
+
 def bancho_server_restart_packet(ms: int) -> bytes:
     packet = PacketWriter(BanchoPacketID.SRV_RESTART)
     packet.write_i32(ms)
@@ -1739,7 +1768,7 @@ async def bancho_friend_add_handler(reader: PacketReader, user: User) -> None:
     if requested_user is None:
         return
 
-    if requested_user.user_id == 1:  # bot is immune
+    if requested_user.is_bot_client:  # bot is immune
         return
 
     if user_id in user.blocks:
@@ -1764,7 +1793,7 @@ async def bancho_friend_remove_handler(reader: PacketReader, user: User) -> None
     if requested_user is None:
         return
 
-    if requested_user.user_id == 1:  # bot is immune
+    if requested_user.is_bot_client:  # bot is immune
         return
 
     if not user_id in user.friends:
@@ -1784,6 +1813,52 @@ async def bancho_join_lobby_handler(reader: PacketReader, user: User) -> None:
 @packets_router.add_handler(BanchoPacketID.OSU_PART_LOBBY)
 async def bancho_part_lobby_handler(reader: PacketReader, user: User) -> None:
     user.in_lobby = False
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_SEND_PRIVATE_MESSAGE)
+async def bancho_send_private_message_handler(reader: PacketReader, user: User) -> None:
+    reader.read_str()
+    message = reader.read_str()
+    recipient = reader.read_str()
+    reader.read_i32()
+
+    if user.silenced:
+        return
+
+    message = message.strip()
+    if not message:
+        return
+
+    targe_osu_token = username_to_token.get(safe_string(recipient))
+    if targe_osu_token is None:
+        return
+
+    target = users.get(targe_osu_token)
+    if target is None:
+        return
+
+    if user.user_id in target.blocks:
+        user.enqueue(bancho_user_dm_blocked_packet(target.username))
+        return
+
+    if target.pm_private and user.user_id not in target.friends:
+        user.enqueue(bancho_user_dm_blocked_packet(target.username))
+        return
+
+    if target.silenced:
+        user.enqueue(bancho_user_silenced_packet(target.username))
+        return
+
+    if len(message) > 2000:
+        message = f"{message[:2000]}... (truncated)"
+
+    if target.is_bot_client:
+        # TODO: bot commands
+        user.send(f"{target.username} is gonna get you.", sender=target)
+    else:
+        target.send(message, sender=user)
+
+    user.update_user()
 
 
 # Bancho Packets END
@@ -1950,11 +2025,19 @@ class User:
     in_lobby: bool = False
 
     is_bot_client: bool = False
-    _packet_queue = bytearray()
+    _packet_queue: bytearray = field(default_factory=bytearray)
 
     @property
     def restricted(self) -> bool:
         return self.privileges & BanchoPrivileges.PLAYER == 0
+
+    @property
+    def remaining_silence(self) -> int:
+        return max(0, int(self.silence_end - time.time()))
+
+    @property
+    def silenced(self) -> bool:
+        return self.remaining_silence != 0
 
     @property
     def current_stats(self) -> UserStatistics:
@@ -2081,6 +2164,23 @@ class User:
         if not self.restricted:
             broadcast_to_online_users(bancho_logout_packet(self.user_id))
 
+    def send(
+        self, message: str, sender: User, channel: BanchoChannel | None = None
+    ) -> None:
+        if channel is not None:
+            recipient = channel.name
+        else:
+            recipient = self.username
+
+        self.enqueue(
+            bancho_send_message_packet(
+                sender=sender.username,
+                message=message,
+                recipient=recipient,
+                sender_id=sender.user_id,
+            )
+        )
+
 
 @dataclass
 class BanchoChannel:
@@ -2155,6 +2255,7 @@ class BanchoChannel:
 
 users: dict[str, User] = {}
 user_id_to_token: dict[int, str] = {}
+username_to_token: dict[str, str] = {}
 channels: dict[str, BanchoChannel] = {}
 
 
@@ -2176,6 +2277,8 @@ class BanchoBot(User):
         self.username = "Męski oszuścik"
         self.username_safe = safe_string(self.username)
 
+        self.email = "bot@osu.com"
+
         self.osu_token = create_random_string(32)
         self.osu_version = "bot"
 
@@ -2194,6 +2297,22 @@ class BanchoBot(User):
         self.silence_end = 0
         self.login_time = int(time.time())
         self.latest_activity = int(time.time())
+
+        super().__init__(
+            user_id=self.user_id,
+            username=self.username,
+            username_safe=self.username_safe,
+            email=self.email,
+            osu_token=self.osu_token,
+            osu_version=self.osu_version,
+            utc_offset=self.utc_offset,
+            pm_private=self.pm_private,
+            privileges=self.privileges,
+            geoloc=self.geoloc,
+            silence_end=self.silence_end,
+            login_time=self.login_time,
+            latest_activity=self.latest_activity,
+        )
 
         self.status = BanchoUserStatus(
             action=BanchoAction.TESTING,
@@ -2366,6 +2485,9 @@ async def bancho_login_handler(request: HTTPRequest) -> BanchoLoginResponse:
     packet_response += bancho_login_perms_packet(user.privileges)
 
     for online_user in users.values():
+        if online_user.restricted:
+            continue
+
         packet_response += online_user.presence_and_stats_packet()
 
     packet_response += user.presence_and_stats_packet()
@@ -2374,8 +2496,12 @@ async def bancho_login_handler(request: HTTPRequest) -> BanchoLoginResponse:
     quote = random.choice(QUOTES)
     packet_response += bancho_notification_packet(f"onecho! - {quote}")
 
+    if not user.restricted:
+        broadcast_to_online_users(user.presence_and_stats_packet())
+
     users[user.osu_token] = user
     user_id_to_token[user.user_id] = user.osu_token
+    username_to_token[user.username_safe] = user.osu_token
 
     user.update_user()
     return {
@@ -2524,6 +2650,7 @@ async def main() -> int:
     bancho_bot = BanchoBot()
     users[bancho_bot.osu_token] = bancho_bot
     user_id_to_token[bancho_bot.user_id] = bancho_bot.osu_token
+    username_to_token[bancho_bot.username_safe] = bancho_bot.osu_token
 
     # Initialise leaderboards
     for mode in OsuMode:
