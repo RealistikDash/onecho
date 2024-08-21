@@ -41,8 +41,8 @@ Bancho:
 - [ ] Server Bot
 - [x] Lobby
 - [x] User Relationships
-- [ ] Private Chat
-- [ ] Public Chat
+- [x] Private Chat
+- [x] Public Chat
 - [ ] Spectator
 - [ ] Match
 - [x] Channel

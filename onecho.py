@@ -1715,17 +1715,27 @@ async def bancho_user_stats_request_all_handler(
 @packets_router.add_handler(BanchoPacketID.OSU_CHANNEL_JOIN, restricted=True)
 async def bancho_channel_join_handler(reader: PacketReader, user: User) -> None:
     channel_name = reader.read_str()
+
+    if not channel_name.startswith("#"):
+        return
+
     channel = channels.get(channel_name)
 
     if channel is None or not user.join_channel(channel):
         error(f"{user.username} failed to join {channel_name}")
 
 
+IGNORED_CHANNELS = ["#userlog"]
+
+
 @packets_router.add_handler(BanchoPacketID.OSU_CHANNEL_PART, restricted=True)
 async def bancho_channel_part_handler(reader: PacketReader, user: User) -> None:
     channel_name = reader.read_str()
 
-    if channel_name in ["#userlog"]:
+    if not channel_name.startswith("#"):
+        return
+
+    if channel_name in IGNORED_CHANNELS:
         return
 
     channel = channels.get(channel_name)
@@ -1858,6 +1868,55 @@ async def bancho_send_private_message_handler(reader: PacketReader, user: User) 
     else:
         target.send(message, sender=user)
 
+    user.update_user()
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_SEND_PUBLIC_MESSAGE)
+async def bancho_send_public_message_handler(reader: PacketReader, user: User) -> None:
+    reader.read_str()
+    message = reader.read_str()
+    recipient = reader.read_str()
+    reader.read_i32()
+
+    if user.silenced:
+        return
+
+    message = message.strip()
+    if not message:
+        return
+
+    if recipient in IGNORED_CHANNELS:
+        return
+    elif recipient == "#spectator":
+        if user.spectating:
+            spec_id = user.spectating.user_id
+        elif user.spectators:
+            spec_id = user.user_id
+        else:
+            return
+
+        channel = channels.get(f"#spec_{spec_id}")
+    elif recipient == "#multiplayer":
+        ...
+        # TODO: multiplayer
+    else:
+        channel = channels.get(recipient)
+
+    if channel is None:
+        return
+
+    if user not in channel.users:
+        return
+
+    if not channel.can_write(user.privileges):
+        return
+
+    if len(message) > 2000:
+        message = f"{message[:2000]}... (truncated)"
+
+    # TODO: check for commands
+
+    channel.send(message, sender=user)
     user.update_user()
 
 
@@ -2251,6 +2310,10 @@ class BanchoChannel:
         for user in self.users:
             if user.user_id not in exclude:
                 user.enqueue(data)
+
+    def send(self, message: str, sender: User) -> None:
+        for user in filter(lambda x: x != sender, self.users):
+            user.send(message, sender, self)
 
 
 users: dict[str, User] = {}
