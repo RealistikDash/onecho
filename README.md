@@ -38,7 +38,7 @@ Bancho:
 - [x] User Login
 - [x] User Logout
 - [x] User Actions
-- [ ] Server Bot
+- [x] Server Bot
 - [x] Lobby
 - [x] User Relationships
 - [x] Private Chat

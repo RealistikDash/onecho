@@ -1863,8 +1863,19 @@ async def bancho_send_private_message_handler(reader: PacketReader, user: User) 
         message = f"{message[:2000]}... (truncated)"
 
     if target.is_bot_client:
-        # TODO: bot commands
-        user.send(f"{target.username} is gonna get you.", sender=target)
+        if not message.startswith("!"):
+            user.send(f"{target.username} is gonna get you.", sender=target)
+            return
+
+        resp = await bancho_bot.handle_commands(user, message, in_channel=False)
+        if resp is None:
+            user.send("Command not found.", sender=target)
+            return
+
+        if resp.response is None:
+            return
+
+        user.send(resp.response, sender=target)
     else:
         target.send(message, sender=user)
 
@@ -1914,9 +1925,22 @@ async def bancho_send_public_message_handler(reader: PacketReader, user: User) -
     if len(message) > 2000:
         message = f"{message[:2000]}... (truncated)"
 
-    # TODO: check for commands
-
     channel.send(message, sender=user)
+    if message.startswith("!"):
+        resp = await bancho_bot.handle_commands(user, message, in_channel=True)
+
+        if resp is None:
+            channel.send("Command not found.", sender=bancho_bot)
+            return
+
+        if resp.response is None:
+            return
+
+        if resp.invisible_response:
+            user.send(resp.response, sender=bancho_bot, channel=channel)
+        else:
+            channel.send(resp.response, sender=bancho_bot)
+
     user.update_user()
 
 
@@ -2328,6 +2352,12 @@ def broadcast_to_online_users(data: bytes, exclude: list[int] = []) -> None:
             user.enqueue(data)
 
 
+def add_user_to_cache(user: User) -> None:
+    users[user.osu_token] = user
+    user_id_to_token[user.user_id] = user.osu_token
+    username_to_token[user.username_safe] = user.osu_token
+
+
 # Bancho Objects END
 
 
@@ -2383,6 +2413,7 @@ class BanchoBot(User):
         )
 
         self.is_bot_client = True
+        self._commands: dict[str, BotCommand] = {}
 
     def enqueue(self, data: bytes) -> None:
         pass
@@ -2401,6 +2432,90 @@ class BanchoBot(User):
             rank=0,
             level=1,
         )
+
+    def add_command(self, command: BotCommand) -> None:
+        self._commands[command.name] = command
+
+        for alias in command.aliases:
+            self._commands[alias] = command
+
+    async def handle_commands(
+        self, user: User, message: str, in_channel: bool
+    ) -> BotCommand | None:
+        args = message.strip().split(" ")
+        assert any(args), "Empty message."
+
+        command_name = args[0].lower()
+        command_cls = self._commands.get(command_name)
+
+        if command_cls is None:
+            return None
+
+        resp = await command_cls.execute(user, args[1:], in_channel)
+        return resp
+
+
+bancho_bot = BanchoBot()
+
+
+class BotCommand:
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        aliases: list[str] = [],
+        priv_req: BanchoPrivileges | None = None,
+        allow_dms: bool = True,
+        allow_channels: bool = True,
+        invisible_response: bool = False,
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.aliases = aliases
+        self.priv_req = priv_req
+        self.allow_dms = allow_dms
+        self.allow_channels = allow_channels
+        self.invisible_response = invisible_response
+
+        self.response: str | None = None
+
+    def _process_sanity_checks(self, user: User, in_channel: bool) -> bool:
+        if not self.allow_dms and not in_channel:
+            return False
+
+        if not self.allow_channels and in_channel:
+            return False
+
+        if self.priv_req is not None and not user.privileges & self.priv_req:
+            return False
+
+        return True
+
+    async def execute(
+        self, user: User, args: list[str], in_channel: bool = False
+    ) -> BotCommand | None:
+        raise NotImplementedError
+
+
+class PingCommand(BotCommand):
+    def __init__(self) -> None:
+        super().__init__(
+            name="!ping",
+            description="Check if the bot is alive.",
+            invisible_response=True,
+        )
+
+    async def execute(
+        self, user: User, args: list[str], in_channel: bool = False
+    ) -> BotCommand | None:
+        if not self._process_sanity_checks(user, in_channel):
+            return None
+
+        self.response = "Pong!"
+        return self
+
+
+bancho_bot.add_command(PingCommand())
 
 
 # Bancho Bot END
@@ -2562,9 +2677,7 @@ async def bancho_login_handler(request: HTTPRequest) -> BanchoLoginResponse:
     if not user.restricted:
         broadcast_to_online_users(user.presence_and_stats_packet())
 
-    users[user.osu_token] = user
-    user_id_to_token[user.user_id] = user.osu_token
-    username_to_token[user.username_safe] = user.osu_token
+    add_user_to_cache(user)
 
     user.update_user()
     return {
@@ -2710,10 +2823,7 @@ DEFAULT_CHANNELS = [
 
 async def main() -> int:
     # Initialise bot
-    bancho_bot = BanchoBot()
-    users[bancho_bot.osu_token] = bancho_bot
-    user_id_to_token[bancho_bot.user_id] = bancho_bot.osu_token
-    username_to_token[bancho_bot.username_safe] = bancho_bot.osu_token
+    add_user_to_cache(bancho_bot)
 
     # Initialise leaderboards
     for mode in OsuMode:
