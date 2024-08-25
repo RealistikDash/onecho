@@ -1300,6 +1300,10 @@ class PacketWriter:
     def write_f32(self, value: float) -> PacketWriter:
         self._buf.extend(struct.pack("<f", value))
         return self
+    
+    def write_raw(self, value: bytes) -> PacketWriter:
+        self._buf.extend(value)
+        return self
 
     def write_uleb128(self, value: int) -> PacketWriter:
         while value >= 0x80:
@@ -1434,6 +1438,10 @@ class PacketReader:
         excess = self._buf[self._pos + packet_size :]
         self._buf = self._buf[: self._pos + packet_size]
         return excess
+    
+
+    def read_remaining_bytes(self) -> bytes:
+        return self._buf[self._pos :]
 
     def __iter__(self) -> PacketReader:
         return self
@@ -1632,6 +1640,47 @@ def bancho_server_restart_packet(ms: int) -> bytes:
     packet.write_i32(ms)
     return packet.finish()
 
+
+def bancho_join_watch_party(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_FELLOW_SPECTATOR_JOINED)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+
+def bancho_leave_watch_party(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_FELLOW_SPECTATOR_LEFT)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+
+def bancho_watch_party_joined_host(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SPECTATOR_JOINED)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+
+def bancho_watch_party_left_host(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SPECTATOR_LEFT)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+
+def bancho_watch_party_no_maidens(user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SPECTATOR_CANT_SPECTATE)
+    packet.write_i32(user_id)
+    return packet.finish()
+
+# TODO: Actually bother building this and maybe do realtime PP :eyes:
+def bancho_spectate_frames(frame_data: bytes) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SPECTATE_FRAMES)
+    packet.write_raw(frame_data)
+    return packet.finish()
+
+
+def bancho_spectate_no_beatmap_notify(lame_user_id: int) -> bytes:
+    packet = PacketWriter(BanchoPacketID.SRV_SPECTATOR_CANT_SPECTATE)
+    packet.write_i32(lame_user_id)
+    return packet.finish()
 
 packets_router = PacketRouter()
 
@@ -1899,14 +1948,10 @@ async def bancho_send_public_message_handler(reader: PacketReader, user: User) -
     if recipient in IGNORED_CHANNELS:
         return
     elif recipient == "#spectator":
-        if user.spectating:
-            spec_id = user.spectating.user_id
-        elif user.spectators:
-            spec_id = user.user_id
+        if user.watch_party is not None:
+            channel = user.watch_party.channel
         else:
             return
-
-        channel = channels.get(f"#spec_{spec_id}")
     elif recipient == "#multiplayer":
         ...
         # TODO: multiplayer
@@ -1942,6 +1987,76 @@ async def bancho_send_public_message_handler(reader: PacketReader, user: User) -
             channel.send(resp.response, sender=bancho_bot)
 
     user.update_user()
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_START_SPECTATING)
+async def bancho_start_spectating_handler(reader: PacketReader, user: User) -> None:
+    user_id = reader.read_i32()
+
+    token = user_id_to_token.get(user_id)
+    if token is None:
+        return
+
+    target = users.get(token)
+    if target is None:
+        return
+
+    if target.is_bot_client:
+        user.enqueue(bancho_notification_packet("The bot is immune to spectating."))
+        user.enqueue(bancho_leave_watch_party(user.user_id))
+        return
+
+
+    target.join_watch_party(user)
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_STOP_SPECTATING)
+async def bancho_stop_spectating_handler(reader: PacketReader, user: User) -> None:
+    if user.watch_party is None:
+        error(
+            f"{user.username!r} has dementia and tried to stop spectating despite not spectating."
+        )
+        return
+
+    user.watch_party.the_watched.leave_watch_party(user)
+
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_SPECTATE_FRAMES)
+async def bancho_spectate_frames_handler(reader: PacketReader, user: User) -> None:
+    frame_data = reader.read_remaining_bytes()
+
+    if user.watch_party is None:
+        error(
+            f"{user.username!r} is not in a watch party BUT tried submitting frames. "
+            "Its like a ghost in the machine. - GitHub Copilot"
+        )
+        return
+    
+    if user.watch_party.the_watched != user:
+        error(
+            f"{user.username!r} tried submitting frames for {user.watch_party.the_watched.username!r} "
+            "despite them being more than capable of doing it themselves."
+        )
+        return
+    
+    user.watch_party.enqueue(
+        bancho_spectate_frames(frame_data)
+    )
+
+
+@packets_router.add_handler(BanchoPacketID.OSU_CANT_SPECTATE)
+async def bancho_cant_spectate_haha_handler(reader: PacketReader, user: User) -> None:
+    if user.watch_party is None:
+        error(
+            f"{user.username!r} tried telling us they can't spectate despite not spectating. "
+            "They are a special kind of stupid."
+        )
+        return
+    
+    user.watch_party.enqueue(
+        bancho_watch_party_no_maidens(user.user_id)
+    )
 
 
 # Bancho Packets END
@@ -2075,6 +2190,17 @@ class UserStatistics:
 
 
 @dataclass
+class UserWatchParty:
+    the_watched: User
+    the_watchers: list[User]
+    channel: BanchoChannel
+
+
+    def enqueue(self, packet: bytes) -> None:
+        for watcher in self.the_watchers:
+            watcher.enqueue(packet)
+
+@dataclass
 class User:
     user_id: int
     username: str
@@ -2102,8 +2228,7 @@ class User:
     blocks: list[int] = field(default_factory=list)
 
     channels: list[BanchoChannel] = field(default_factory=list)
-    spectators: list[User] = field(default_factory=list)
-    spectating: User | None = None
+    watch_party: UserWatchParty | None = None
 
     in_lobby: bool = False
 
@@ -2263,6 +2388,57 @@ class User:
                 sender_id=sender.user_id,
             )
         )
+
+    
+    def join_watch_party(self, user: User) -> None:
+        """Makes the given `user` join this user's watch party."""
+
+        # This has the funny side effect that if you spec someone that is specing someone else, you will join their watch party.
+        # Imo that is bing chilling.
+        if self.watch_party is None:
+            self.watch_party = UserWatchParty(
+                the_watched=self,
+                the_watchers=[user],
+                channel=BanchoChannel(
+                    _name=f"#spec_{self.user_id}",
+                    topic=f"Watch party for {self.username!r}",
+                    write_privileges=BanchoPrivileges.PLAYER,
+                    read_privileges=BanchoPrivileges.PLAYER,
+                    auto_join=False,
+                    temporary=True,
+                ),
+            )
+            self.join_channel(self.watch_party.channel)
+            user.join_channel(self.watch_party.channel)
+        
+        else:
+            self.watch_party.the_watchers.append(user)
+            user.join_channel(self.watch_party.channel)
+
+        self.watch_party.the_watched.enqueue(
+            bancho_join_watch_party(user.user_id)
+        )
+        self.watch_party.the_watched.enqueue(
+            bancho_watch_party_joined_host(user.user_id)
+        )
+
+
+    def leave_watch_party(self, user: User) -> None:
+        """Makes the given `user` leave this user's watch party."""
+
+        if self.watch_party is None:
+            return
+
+        self.watch_party.the_watchers.remove(user)
+        user.leave_channel(self.watch_party.channel)
+
+        self.watch_party.the_watched.enqueue(
+            bancho_leave_watch_party(user.user_id)
+        )
+
+        if not self.watch_party.the_watchers:
+            self.watch_party.the_watched.leave_channel(self.watch_party.channel)
+            self.watch_party = None
 
 
 @dataclass

@@ -43,7 +43,7 @@ Bancho:
 - [x] User Relationships
 - [x] Private Chat
 - [x] Public Chat
-- [ ] Spectator
+- [x] Spectator
 - [ ] Match
 - [x] Channel
 
