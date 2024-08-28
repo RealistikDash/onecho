@@ -12,7 +12,7 @@ This project follows four core rules:
 Current project progress.
 
 Logger:
-- [x] Coloured logging
+- [x] Structured Logging
 - [x] Logging of INFO, WARNING, ERROR.
 - [x] Optional debug logging
 
@@ -49,3 +49,10 @@ Bancho:
 
 Avatar:
 - [x] Avatar serving
+
+Commands
+- [x] Command framework for chat commands
+- [ ] Roulette
+- [ ] Blackjack
+- [ ] (OPTIONAL) Use NP to calculate the PP of the current map
+- [ ] Slots

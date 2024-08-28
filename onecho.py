@@ -12,6 +12,8 @@ import struct
 import traceback
 import urllib.request
 import urllib.parse
+import hashlib
+import glob
 import json
 import os
 import time
@@ -40,7 +42,9 @@ from dataclasses import field
 
 
 DEBUG = "debug" in sys.argv
-MAIN_DOMAIN = "akatsuki.gg"
+SETTING_MAIN_DOMAIN = os.environ.get("MAIN_DOMAIN", "localhost")
+SETTING_HTTP_PORT = int(os.environ.get("HTTP_PORT", 2137))
+SETTING_HTTP_HOST = os.environ.get("HTTP_HOST", "0.0.0.0")
 
 STATUS_CODE = {
     100: "Continue",
@@ -343,29 +347,51 @@ class Ansi(IntEnum):
 # Logger START
 
 
-def _log(content: str, action: str, colour: Ansi = Ansi.WHITE):
-    timestamp = time.strftime("%d-%m-%Y %H:%M:%S", time.localtime())
-    sys.stdout.write(  # This is mess but it forms in really cool log.
-        f"\x1b[90m[{timestamp} - {colour}\033[1"
-        f"m{action}\033[0m\x1b[90m]: \x1b[94m{content}\x1b[0m\n"
-    )
+def info(text: str, *, extra: dict[str, Any] | None = None):
+    data = {
+        "level": "INFO",
+        "message": text,
+    }
+
+    if extra:
+        data["extra"] = extra # type: ignore
+    print(json.dumps(data))
 
 
-def info(text: str):
-    _log(text, "INFO", Ansi.GREEN)
+def error(text: str, *, extra: dict[str, Any] | None = None):
+    data = {
+        "level": "ERROR",
+        "message": text,
+    }
+
+    if extra:
+        data["extra"] = extra # type: ignore
+    print(json.dumps(data))
 
 
-def error(text: str):
-    _log(text, "ERROR", Ansi.RED)
+def warning(text: str, *, extra: dict[str, Any] | None = None):
+    data = {
+        "level": "WARNING",
+        "message": text,
+    }
+
+    if extra:
+        data["extra"] = extra # type: ignore
+    print(json.dumps(data))
 
 
-def warning(text: str):
-    _log(text, "WARNING", Ansi.BLUE)
+def debug(text: str, *, extra: dict[str, Any] | None = None):
+    if not DEBUG:
+        return
+    
+    data = {
+        "level": "DEBUG",
+        "message": text,
+    }
 
-
-def debug(text: str):
-    if DEBUG:
-        _log(text, "DEBUG", Ansi.WHITE)
+    if extra:
+        data["extra"] = extra # type: ignore
+    print(json.dumps(data))
 
 
 # Logger END
@@ -439,8 +465,9 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
         self.__innit__()
 
         if self._cache_table:
-            with open(self._file_name, "r") as f:
-                self._table_cache = f.readlines()
+            if os.path.exists(self._file_name):
+                with open(self._file_name, "r") as f:
+                    self._table_cache = f.readlines()
 
     def __len__(self) -> int:
         if self._table_cache:
@@ -451,7 +478,7 @@ class CSVBasedDatabase[T: CSVModel]:  # Based af.
 
     def __innit__(self) -> None:
         if not os.path.exists(self._file_name):
-            with open(self._file_name, "w") as f:
+            with open(self._file_name, "w+") as f:
                 f.write("")
 
     def into_model(self, line: str) -> T:
@@ -1069,6 +1096,10 @@ class AsyncHTTPServer:
     async def start_server(self) -> None:
         if self.on_start_server_coroutine is not None:
             await self.on_start_server_coroutine()
+
+        info(
+            f"Starting HTTP server on {self.address}:{self.port}",
+        )
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setblocking(False)
@@ -2702,10 +2733,10 @@ bancho_bot.add_command(PingCommand())
 
 bancho_router = Router(
     {
-        f"c.{MAIN_DOMAIN}",
-        f"ce.{MAIN_DOMAIN}",
-        f"c4.{MAIN_DOMAIN}",
-        f"c6.{MAIN_DOMAIN}",
+        f"c.{SETTING_MAIN_DOMAIN}",
+        f"ce.{SETTING_MAIN_DOMAIN}",
+        f"c4.{SETTING_MAIN_DOMAIN}",
+        f"c6.{SETTING_MAIN_DOMAIN}",
     }
 )
 
@@ -2929,33 +2960,52 @@ async def bancho_root_handler(request: HTTPRequest) -> None:
 # Avatar Domain START
 
 
-avatar_router = Router(f"a.{MAIN_DOMAIN}")
+avatar_router = Router(f"a.{SETTING_MAIN_DOMAIN}")
 
-if os.path.exists("avatars/default.png"):
-    with open("avatars/default.png", "rb") as f:
-        DEFAULT_AVATAR_BYTES = f.read()
-else:
-    DEFAULT_AVATAR_BYTES = b""
+DEFAULT_AVATAR_LIST = glob.glob("avatars/default/*.png") + glob.glob("avatars/default/*.jpg")
+
+def hash_string_as_integer(string: str) -> int:
+    return int(hashlib.sha256((string).encode()).hexdigest(), 16)
+
+def get_random_avatar(user_id: int | str) -> str:
+    user_hash = hash_string_as_integer(str(user_id))
+    hashed_filenames = {hash_string_as_integer(filename): filename for filename in DEFAULT_AVATAR_LIST}
+    
+    # Sort the hashed filenames and find the closest hash to the user_hash
+    sorted_hashes = sorted(hashed_filenames.keys())
+    closest_hash = next(filter(lambda x: user_hash <= x, sorted_hashes), sorted_hashes[0])
+    return hashed_filenames[closest_hash]
+
+
+def get_avatar_data(user_id: int) -> bytes:
+    if os.path.exists(f"avatars/{user_id}.png"):
+        path = f"avatars/{user_id}.png"
+    elif os.path.exists(f"avatars/{user_id}.jpg"):
+        path = f"avatars/{user_id}.jpg"
+    else:
+        path = get_random_avatar(user_id)
+
+    with open(path, "rb") as f:
+        return f.read()
 
 
 @avatar_router.add_endpoint("/{}", methods=["GET"])
 async def avatar_handler(request: HTTPRequest) -> None:
     user_id = request.path.split("/")[-1]
     if not user_id.isdigit():
+        path = get_random_avatar(user_id)
+        with open(path, "rb") as f:
+            avatar_data = f.read()
         await request.send_response(
             status_code=200,
-            body=DEFAULT_AVATAR_BYTES,
+            body=avatar_data,
             headers={
                 "Content-Type": "image/png",
             },
         )
         return
 
-    if os.path.exists(f"avatars/{user_id}.png"):
-        with open(f"avatars/{user_id}.png", "rb") as f:
-            avatar_data = f.read()
-    else:
-        avatar_data = DEFAULT_AVATAR_BYTES
+    avatar_data = get_avatar_data(int(user_id))
 
     await request.send_response(
         status_code=200,
@@ -2998,6 +3048,9 @@ DEFAULT_CHANNELS = [
 
 
 async def main() -> int:
+    info(
+        "onecho - The osu private server that is not a private server, but a public server."
+    ) # Written by Copilot
     # Initialise bot
     add_user_to_cache(bancho_bot)
 
@@ -3020,7 +3073,7 @@ async def main() -> int:
         channels[f"#{channel.result.name}"] = BanchoChannel.from_model(channel.result)
 
     # Initialise server
-    server = AsyncHTTPServer(address="127.0.0.1", port=2137)
+    server = AsyncHTTPServer(address=SETTING_HTTP_HOST, port=SETTING_HTTP_PORT)
     server.add_router(bancho_router)
     server.add_router(avatar_router)
 
