@@ -354,7 +354,7 @@ def info(text: str, *, extra: dict[str, Any] | None = None):
     }
 
     if extra:
-        data["extra"] = extra # type: ignore
+        data["extra"] = extra  # type: ignore
     print(json.dumps(data))
 
 
@@ -365,7 +365,7 @@ def error(text: str, *, extra: dict[str, Any] | None = None):
     }
 
     if extra:
-        data["extra"] = extra # type: ignore
+        data["extra"] = extra  # type: ignore
     print(json.dumps(data))
 
 
@@ -376,21 +376,21 @@ def warning(text: str, *, extra: dict[str, Any] | None = None):
     }
 
     if extra:
-        data["extra"] = extra # type: ignore
+        data["extra"] = extra  # type: ignore
     print(json.dumps(data))
 
 
 def debug(text: str, *, extra: dict[str, Any] | None = None):
     if not DEBUG:
         return
-    
+
     data = {
         "level": "DEBUG",
         "message": text,
     }
 
     if extra:
-        data["extra"] = extra # type: ignore
+        data["extra"] = extra  # type: ignore
     print(json.dumps(data))
 
 
@@ -1331,7 +1331,7 @@ class PacketWriter:
     def write_f32(self, value: float) -> PacketWriter:
         self._buf.extend(struct.pack("<f", value))
         return self
-    
+
     def write_raw(self, value: bytes) -> PacketWriter:
         self._buf.extend(value)
         return self
@@ -1469,7 +1469,6 @@ class PacketReader:
         excess = self._buf[self._pos + packet_size :]
         self._buf = self._buf[: self._pos + packet_size]
         return excess
-    
 
     def read_remaining_bytes(self) -> bytes:
         return self._buf[self._pos :]
@@ -1701,6 +1700,7 @@ def bancho_watch_party_no_maidens(user_id: int) -> bytes:
     packet.write_i32(user_id)
     return packet.finish()
 
+
 # TODO: Actually bother building this and maybe do realtime PP :eyes:
 def bancho_spectate_frames(frame_data: bytes) -> bytes:
     packet = PacketWriter(BanchoPacketID.SRV_SPECTATE_FRAMES)
@@ -1712,6 +1712,7 @@ def bancho_spectate_no_beatmap_notify(lame_user_id: int) -> bytes:
     packet = PacketWriter(BanchoPacketID.SRV_SPECTATOR_CANT_SPECTATE)
     packet.write_i32(lame_user_id)
     return packet.finish()
+
 
 packets_router = PacketRouter()
 
@@ -2037,7 +2038,6 @@ async def bancho_start_spectating_handler(reader: PacketReader, user: User) -> N
         user.enqueue(bancho_leave_watch_party(user.user_id))
         return
 
-
     target.join_watch_party(user)
 
 
@@ -2052,7 +2052,6 @@ async def bancho_stop_spectating_handler(reader: PacketReader, user: User) -> No
     user.watch_party.the_watched.leave_watch_party(user)
 
 
-
 @packets_router.add_handler(BanchoPacketID.OSU_SPECTATE_FRAMES)
 async def bancho_spectate_frames_handler(reader: PacketReader, user: User) -> None:
     frame_data = reader.read_remaining_bytes()
@@ -2063,17 +2062,15 @@ async def bancho_spectate_frames_handler(reader: PacketReader, user: User) -> No
             "Its like a ghost in the machine. - GitHub Copilot"
         )
         return
-    
+
     if user.watch_party.the_watched != user:
         error(
             f"{user.username!r} tried submitting frames for {user.watch_party.the_watched.username!r} "
             "despite them being more than capable of doing it themselves."
         )
         return
-    
-    user.watch_party.enqueue(
-        bancho_spectate_frames(frame_data)
-    )
+
+    user.watch_party.enqueue(bancho_spectate_frames(frame_data))
 
 
 @packets_router.add_handler(BanchoPacketID.OSU_CANT_SPECTATE)
@@ -2084,10 +2081,8 @@ async def bancho_cant_spectate_haha_handler(reader: PacketReader, user: User) ->
             "They are a special kind of stupid."
         )
         return
-    
-    user.watch_party.enqueue(
-        bancho_watch_party_no_maidens(user.user_id)
-    )
+
+    user.watch_party.enqueue(bancho_watch_party_no_maidens(user.user_id))
 
 
 # Bancho Packets END
@@ -2127,44 +2122,39 @@ class LeaderboardEntry(TypedDict):
 
 
 class BanchoLeaderboard:
-    __slots__ = ("_lock", "_leaderboard", "_lookup_table")
+    __slots__ = ("_leaderboard", "_lookup_table")
 
     def __init__(self) -> None:
-        self._lock = asyncio.Lock()
         self._leaderboard: list[LeaderboardEntry] = []
         self._lookup_table: dict[int, int] = {}  # user_id -> placement
 
     def __len__(self) -> int:
         return len(self._leaderboard)
 
-    async def _rebuild_leaderboard(self) -> None:
-        async with self._lock:
-            sort_leaderboard(self._leaderboard)
-            for placement, entry in enumerate(self._leaderboard):
-                self._lookup_table[entry["user_id"]] = placement
+    def _rebuild_leaderboard(self) -> None:
+        sort_leaderboard(self._leaderboard)
+        for placement, entry in enumerate(self._leaderboard):
+            self._lookup_table[entry["user_id"]] = placement
 
-    async def get_placement(self, user_id: int) -> int | None:
-        async with self._lock:
-            return self._lookup_table.get(user_id)
+    def get_placement(self, user_id: int) -> int | None:
+        return self._lookup_table.get(user_id)
 
-    async def add_entry(self, user_id: int, score: int) -> None:
-        async with self._lock:
-            if user_id in self._lookup_table:
-                self._leaderboard[self._lookup_table[user_id]]["score"] = score
-            else:
-                self._leaderboard.append({"user_id": user_id, "score": score})
+    def add_entry(self, user_id: int, score: int) -> None:
+        if user_id in self._lookup_table:
+            self._leaderboard[self._lookup_table[user_id]]["score"] = score
+        else:
+            self._leaderboard.append({"user_id": user_id, "score": score})
 
-        await self._rebuild_leaderboard()
+        self._rebuild_leaderboard()
 
-    async def update_entry(self, user_id: int, score: int) -> None:
-        await self.add_entry(user_id, score)
+    def update_entry(self, user_id: int, score: int) -> None:
+        self.add_entry(user_id, score)
 
-    async def remove_entry(self, user_id: int) -> None:
-        async with self._lock:
-            placement = self._lookup_table.pop(user_id)
-            self._leaderboard.pop(placement)
+    def remove_entry(self, user_id: int) -> None:
+        placement = self._lookup_table.pop(user_id)
+        self._leaderboard.pop(placement)
 
-        await self._rebuild_leaderboard()
+        self._rebuild_leaderboard()
 
 
 # fmt: off
@@ -2226,10 +2216,10 @@ class UserWatchParty:
     the_watchers: list[User]
     channel: BanchoChannel
 
-
     def enqueue(self, packet: bytes) -> None:
         for watcher in self.the_watchers:
             watcher.enqueue(packet)
+
 
 @dataclass
 class User:
@@ -2420,7 +2410,6 @@ class User:
             )
         )
 
-    
     def join_watch_party(self, user: User) -> None:
         """Makes the given `user` join this user's watch party."""
 
@@ -2441,18 +2430,15 @@ class User:
             )
             self.join_channel(self.watch_party.channel)
             user.join_channel(self.watch_party.channel)
-        
+
         else:
             self.watch_party.the_watchers.append(user)
             user.join_channel(self.watch_party.channel)
 
-        self.watch_party.the_watched.enqueue(
-            bancho_join_watch_party(user.user_id)
-        )
+        self.watch_party.the_watched.enqueue(bancho_join_watch_party(user.user_id))
         self.watch_party.the_watched.enqueue(
             bancho_watch_party_joined_host(user.user_id)
         )
-
 
     def leave_watch_party(self, user: User) -> None:
         """Makes the given `user` leave this user's watch party."""
@@ -2463,9 +2449,7 @@ class User:
         self.watch_party.the_watchers.remove(user)
         user.leave_channel(self.watch_party.channel)
 
-        self.watch_party.the_watched.enqueue(
-            bancho_leave_watch_party(user.user_id)
-        )
+        self.watch_party.the_watched.enqueue(bancho_leave_watch_party(user.user_id))
 
         if not self.watch_party.the_watchers:
             self.watch_party.the_watched.leave_channel(self.watch_party.channel)
@@ -2962,18 +2946,26 @@ async def bancho_root_handler(request: HTTPRequest) -> None:
 
 avatar_router = Router(f"a.{SETTING_MAIN_DOMAIN}")
 
-DEFAULT_AVATAR_LIST = glob.glob("avatars/default/*.png") + glob.glob("avatars/default/*.jpg")
+DEFAULT_AVATAR_LIST = glob.glob("avatars/default/*.png") + glob.glob(
+    "avatars/default/*.jpg"
+)
+
 
 def hash_string_as_integer(string: str) -> int:
     return int(hashlib.sha256((string).encode()).hexdigest(), 16)
 
+
 def get_random_avatar(user_id: int | str) -> str:
     user_hash = hash_string_as_integer(str(user_id))
-    hashed_filenames = {hash_string_as_integer(filename): filename for filename in DEFAULT_AVATAR_LIST}
-    
+    hashed_filenames = {
+        hash_string_as_integer(filename): filename for filename in DEFAULT_AVATAR_LIST
+    }
+
     # Sort the hashed filenames and find the closest hash to the user_hash
     sorted_hashes = sorted(hashed_filenames.keys())
-    closest_hash = next(filter(lambda x: user_hash <= x, sorted_hashes), sorted_hashes[0])
+    closest_hash = next(
+        filter(lambda x: user_hash <= x, sorted_hashes), sorted_hashes[0]
+    )
     return hashed_filenames[closest_hash]
 
 
@@ -3050,7 +3042,7 @@ DEFAULT_CHANNELS = [
 async def main() -> int:
     info(
         "onecho - The osu private server that is not a private server, but a public server."
-    ) # Written by Copilot
+    )  # Written by Copilot
     # Initialise bot
     add_user_to_cache(bancho_bot)
 
