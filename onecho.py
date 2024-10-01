@@ -2281,7 +2281,7 @@ class User:
 
     async def update_ranks(self) -> None:
         for mode in OsuMode:
-            placement = await leaderboards[mode].get_placement(self.user_id)
+            placement = leaderboards[mode].get_placement(self.user_id)
             if placement is not None:
                 self.stats[mode].rank = placement + 1
             else:
@@ -2824,7 +2824,7 @@ async def bancho_login_handler(request: HTTPRequest) -> BanchoLoginResponse:
 
     if just_registered:
         for mode in OsuMode:
-            await leaderboards[mode].add_entry(
+            leaderboards[mode].add_entry(
                 user_id=user.user_id,
                 score=0,
             )
@@ -3050,7 +3050,7 @@ async def main() -> int:
     for mode in OsuMode:
         records = user_stats_db[mode].all()
         for record in records:
-            await leaderboards[mode].add_entry(
+            leaderboards[mode].add_entry(
                 user_id=record.result.user_id,
                 score=record.result.pp,
             )
